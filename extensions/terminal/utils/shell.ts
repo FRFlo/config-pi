@@ -1,0 +1,374 @@
+import { existsSync } from "node:fs";
+import { delimiter, join } from "node:path";
+import { spawnSync } from "child_process";
+function getBinDir() { return ""; }
+
+/** Family of a resolved shell executable, used to pick invocation arguments. */
+export type ShellKind = "bash" | "sh" | "cmd" | "powershell";
+
+export interface ShellConfig {
+	shell: string;
+	args: string[];
+	commandTransport?: "argv" | "stdin";
+	/** Detected shell family. Lets PTY callers pass the right command transport per shell. */
+	kind?: ShellKind;
+}
+
+/** Environment variable that overrides shell resolution with an explicit bash path (Windows-first). */
+export const GIT_BASH_PATH_ENV = "SENPI_GIT_BASH_PATH";
+
+/**
+ * Find bash executable on PATH (cross-platform)
+ */
+function isLegacyWslBashPath(path: string): boolean {
+	const normalized = path.replace(/\//g, "\\").toLowerCase();
+	return /^[a-z]:\\windows\\(?:system32|sysnative)\\bash\.exe$/.test(normalized);
+}
+
+/** Classify a shell executable by its basename so non-bash shells get correct args. */
+export function resolveShellKind(shellPath: string): ShellKind {
+	const base = shellPath
+		.replace(/\\/g, "/")
+		.split("/")
+		.pop()
+		?.toLowerCase()
+		.replace(/\.exe$/, "");
+	if (base === "cmd") return "cmd";
+	if (base === "powershell" || base === "pwsh") return "powershell";
+	if (base === "sh") return "sh";
+	return "bash";
+}
+
+function getBashShellConfig(shell: string): ShellConfig {
+	return isLegacyWslBashPath(shell)
+		? { shell, args: ["-s"], commandTransport: "stdin", kind: "bash" }
+		: { shell, args: ["-c"], kind: "bash" };
+}
+
+/**
+ * Build a ShellConfig for an explicit shell path, honoring the shell KIND so
+ * cmd.exe uses `/c`, PowerShell uses `-NoProfile -Command`, and bash/sh use
+ * `-c` (or WSL bash `-s` via stdin).
+ */
+function getShellConfigForPath(shellPath: string): ShellConfig {
+	const kind = resolveShellKind(shellPath);
+	switch (kind) {
+		case "cmd":
+			return { shell: shellPath, args: ["/c"], kind };
+		case "powershell":
+			return { shell: shellPath, args: ["-NoProfile", "-Command"], kind };
+		case "sh":
+			return { shell: shellPath, args: ["-c"], kind };
+		default:
+			return getBashShellConfig(shellPath);
+	}
+}
+
+function findExecutableOnPath(executable: string): string | null {
+	if (process.platform === "win32") {
+		// Windows: Use 'where' and verify file exists (where can return non-existent paths)
+		try {
+			const result = spawnSync("where", [executable], {
+				encoding: "utf-8",
+				timeout: 5000,
+				windowsHide: true,
+			});
+			if (result.status === 0 && result.stdout) {
+				const firstMatch = result.stdout.trim().split(/\r?\n/)[0];
+				if (firstMatch && existsSync(firstMatch)) {
+					return firstMatch;
+				}
+			}
+		} catch {
+			// Ignore errors
+		}
+		return null;
+	}
+
+	// Unix: Use 'which' and trust its output (handles Termux and special filesystems)
+	try {
+		const result = spawnSync("which", [executable], { encoding: "utf-8", timeout: 5000 });
+		if (result.status === 0 && result.stdout) {
+			const firstMatch = result.stdout.trim().split(/\r?\n/)[0];
+			if (firstMatch) {
+				return firstMatch;
+			}
+		}
+	} catch {
+		// Ignore errors
+	}
+	return null;
+}
+
+/**
+ * Resolve shell configuration based on platform and an optional explicit shell path.
+ * Resolution order:
+ * 1. User-specified shellPath
+ * 2. On Windows: Git Bash in known locations, then bash on PATH
+ * 3. On Unix: /bin/bash, then bash on PATH, then fallback to sh
+ */
+export function getShellConfig(customShellPath?: string): ShellConfig {
+	// 1. Check user-specified shell path
+	if (customShellPath) {
+		if (existsSync(customShellPath)) {
+			return getShellConfigForPath(customShellPath);
+		}
+		throw new Error(`Custom shell path not found: ${customShellPath}`);
+	}
+
+	// 2. SENPI_GIT_BASH_PATH override wins over platform probing.
+	const gitBashOverride = process.env[GIT_BASH_PATH_ENV];
+	if (gitBashOverride) {
+		if (existsSync(gitBashOverride)) {
+			return getShellConfigForPath(gitBashOverride);
+		}
+		throw new Error(`${GIT_BASH_PATH_ENV} points to a missing shell: ${gitBashOverride}`);
+	}
+
+	if (process.platform === "win32") {
+		// 3. Try Git Bash in known locations
+		const paths: string[] = [];
+		const programFiles = process.env.ProgramFiles;
+		if (programFiles) {
+			paths.push(`${programFiles}\\Git\\bin\\bash.exe`);
+		}
+		const programFilesX86 = process.env["ProgramFiles(x86)"];
+		if (programFilesX86) {
+			paths.push(`${programFilesX86}\\Git\\bin\\bash.exe`);
+		}
+
+		for (const path of paths) {
+			if (existsSync(path)) {
+				return getBashShellConfig(path);
+			}
+		}
+
+		// 3. Fallback: search bash.exe on PATH (Cygwin, MSYS2, WSL, etc.)
+		const bashOnPath = findExecutableOnPath("bash.exe");
+		if (bashOnPath) {
+			return getBashShellConfig(bashOnPath);
+		}
+
+		throw new Error(
+			`No bash shell found. Options:\n` +
+				`  1. Install Git for Windows: https://git-scm.com/download/win\n` +
+				`  2. Add your bash to PATH (Cygwin, MSYS2, etc.)\n` +
+				"  3. Set shellPath in settings.json\n\n" +
+				`Searched Git Bash in:\n${paths.map((p) => `  ${p}`).join("\n")}`,
+		);
+	}
+
+	// Unix: try /bin/bash, then bash on PATH, then fallback to sh
+	if (existsSync("/bin/bash")) {
+		return getBashShellConfig("/bin/bash");
+	}
+
+	const bashOnPath = findExecutableOnPath("bash");
+	if (bashOnPath) {
+		return getBashShellConfig(bashOnPath);
+	}
+
+	return { shell: "sh", args: ["-c"] };
+}
+
+export const POWERSHELL_ARGS = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"] as const;
+
+/** Resolve PowerShell on Windows, preferring PowerShell 7 when available. */
+export function getPowerShellConfig(): ShellConfig {
+	if (process.platform !== "win32") {
+		throw new Error("The powershell tool is only available on Windows.");
+	}
+
+	const shell = findExecutableOnPath("pwsh.exe") ?? findExecutableOnPath("powershell.exe");
+	if (!shell) {
+		throw new Error("No PowerShell executable found. Install PowerShell or add powershell.exe/pwsh.exe to PATH.");
+	}
+
+	return { shell, args: [...POWERSHELL_ARGS] };
+}
+
+export function getShellEnv(): NodeJS.ProcessEnv {
+	const binDir = getBinDir();
+	const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+	const currentPath = process.env[pathKey] ?? "";
+	const pathEntries = currentPath.split(delimiter).filter(Boolean);
+	const hasBinDir = pathEntries.includes(binDir);
+	const updatedPath = hasBinDir ? currentPath : [binDir, currentPath].filter(Boolean).join(delimiter);
+
+	return {
+		...process.env,
+		[pathKey]: updatedPath,
+	};
+}
+
+/**
+ * Sanitize binary output for display/storage.
+ * Removes characters that crash string-width or cause display issues:
+ * - Control characters (except tab, newline, carriage return)
+ * - Lone surrogates
+ * - Unicode Format characters (crash string-width due to a bug)
+ * - Characters with undefined code points
+ */
+export function sanitizeBinaryOutput(str: string): string {
+	// Use Array.from to properly iterate over code points (not code units)
+	// This handles surrogate pairs correctly and catches edge cases where
+	// codePointAt() might return undefined
+	if (!hasUnsafeDisplayCharacter(str)) {
+		return str;
+	}
+
+	return Array.from(str)
+		.filter((char) => {
+			// Filter out characters that cause string-width to crash
+			// This includes:
+			// - Unicode format characters
+			// - Lone surrogates (already filtered by Array.from)
+			// - Control chars except \t \n \r
+			// - Characters with undefined code points
+
+			const code = char.codePointAt(0);
+
+			// Skip if code point is undefined (edge case with invalid strings)
+			if (code === undefined) return false;
+
+			// Allow tab, newline, carriage return
+			if (code === 0x09 || code === 0x0a || code === 0x0d) return true;
+
+			// Filter out control characters (0x00-0x1F, except 0x09, 0x0a, 0x0x0d)
+			if (code <= 0x1f) return false;
+
+			// Filter out Unicode format characters
+			if (code >= 0xfff9 && code <= 0xfffb) return false;
+
+			return true;
+		})
+		.join("");
+}
+
+function hasUnsafeDisplayCharacter(str: string): boolean {
+	for (let i = 0; i < str.length; i++) {
+		const code = str.charCodeAt(i);
+		const isAllowedControl = code === 0x09 || code === 0x0a || code === 0x0d;
+		if (code <= 0x1f && !isAllowedControl) return true;
+		if (code >= 0xfff9 && code <= 0xfffb) return true;
+	}
+	return false;
+}
+
+/**
+ * Detached child processes must be tracked so they can be killed on parent
+ * shutdown signals (SIGHUP/SIGTERM).
+ */
+const trackedDetachedChildPids = new Set<number>();
+
+export function trackDetachedChildPid(pid: number): void {
+	trackedDetachedChildPids.add(pid);
+}
+
+export function untrackDetachedChildPid(pid: number): void {
+	trackedDetachedChildPids.delete(pid);
+}
+
+export function killTrackedDetachedChildren(): void {
+	for (const pid of trackedDetachedChildPids) {
+		killProcessTree(pid);
+	}
+	trackedDetachedChildPids.clear();
+}
+
+/**
+ * Ordered `taskkill` launchers to try, most reliable first.
+ *
+ * `spawn("taskkill", ...)` relies on a PATH lookup, so any session whose PATH lost
+ * `%SystemRoot%\System32` (a POSIX-style PATH inherited from a Git Bash/MSYS launcher,
+ * a truncated user PATH, a locked-down service account) fails to resolve it. A broken PATH
+ * must not cost us the process-tree kill, so every absolute System32 location that actually
+ * exists is tried before the bare PATH-resolved name.
+ */
+export function windowsTaskkillCandidates(env: NodeJS.ProcessEnv = process.env): string[] {
+	// A bare `SystemDrive` is drive-relative ("C:"), so anchor it before joining.
+	const systemDrive = env.SystemDrive ? `${env.SystemDrive}\\` : undefined;
+	const roots = [env.SystemRoot, env.SYSTEMROOT, env.windir, systemDrive && join(systemDrive, "Windows")];
+	const candidates: string[] = [];
+	for (const root of roots) {
+		if (!root) continue;
+		// Sysnative reaches the real 64-bit System32 from a 32-bit process, where System32
+		// is redirected to SysWOW64.
+		for (const systemDir of ["System32", "Sysnative"]) {
+			const absolute = join(root, systemDir, "taskkill.exe");
+			if (!candidates.includes(absolute) && existsSync(absolute)) candidates.push(absolute);
+		}
+	}
+	candidates.push("taskkill.exe");
+	return candidates;
+}
+
+function killProcessDirectly(pid: number): void {
+	try {
+		process.kill(pid);
+	} catch {
+		// Process already dead.
+	}
+}
+
+/** Upper bound on how long a shutdown may block waiting for `taskkill` to finish. */
+const TASKKILL_TIMEOUT_MS = 5_000;
+
+function taskkillHandledTree(pid: number, taskkillPath: string): boolean {
+	try {
+		const result = spawnSync(taskkillPath, ["/F", "/T", "/PID", String(pid)], {
+			stdio: "ignore",
+			windowsHide: true,
+			timeout: TASKKILL_TIMEOUT_MS,
+		});
+		// `error` means the launcher never started (ENOENT, EACCES); a null status means
+		// the timeout killed it. Any real taskkill exit code counts as handled.
+		return result.error === undefined && result.status !== null;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Kill a process and all its children on Windows via `taskkill /T`.
+ *
+ * Synchronous on purpose. Shutdown paths call `killTrackedDetachedChildren()` and then
+ * `process.exit()` in the same tick (`emergencyTerminalExit()`), so neither an
+ * asynchronous killer nor a fallback wired to a child's `error` event would ever run and
+ * the tracked child would survive. `spawnSync` also reports a failed executable lookup on
+ * its returned `error` field instead of emitting it, so a PATH without
+ * `%SystemRoot%\System32` can no longer surface as an uncaught `spawn taskkill ENOENT`.
+ *
+ * The direct `process.kill` at the end is a degraded last resort reached only when no
+ * `taskkill.exe` can be launched at all. It maps to `TerminateProcess`, which does not
+ * touch descendants — the same limitation `packages/pty/src/pipe-fallback.ts` documents.
+ * Nothing in-process can walk a Windows process tree without an external tool, so this
+ * still beats leaving the whole tree running.
+ */
+export function killWindowsProcessTree(pid: number, taskkillPaths = windowsTaskkillCandidates()): void {
+	for (const taskkillPath of taskkillPaths) {
+		if (taskkillHandledTree(pid, taskkillPath)) return;
+	}
+	killProcessDirectly(pid);
+}
+
+/**
+ * Kill a process and all its children (cross-platform)
+ */
+export function killProcessTree(pid: number): void {
+	if (process.platform === "win32") {
+		killWindowsProcessTree(pid);
+	} else {
+		// Use SIGKILL on Unix/Linux/Mac
+		try {
+			process.kill(-pid, "SIGKILL");
+		} catch {
+			// Fallback to killing just the child if process group kill fails
+			try {
+				process.kill(pid, "SIGKILL");
+			} catch {
+				// Process already dead
+			}
+		}
+	}
+}

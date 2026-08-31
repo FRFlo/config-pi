@@ -34,3 +34,5 @@ tmp/
 *.log
 bin/fd.exe
 bin/rg.exe
+.profile/
+**/.profile/

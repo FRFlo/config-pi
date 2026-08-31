@@ -1,0 +1,16 @@
+{
+  "name": "pi-extension-terminal",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Persistent terminal tools for pi: bash, bash_output, bash_input, bash_resize, kill_bash, monitor.",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "dependencies": {
+    "@xterm/headless": "^5.5.0",
+    "typebox": "npm:@sinclair/typebox@^0.34.52"
+  }
+}

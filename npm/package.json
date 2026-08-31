@@ -2,7 +2,9 @@
   "name": "pi-extensions",
   "private": true,
   "dependencies": {
+    "@xterm/headless": "^6.0.0",
     "pi-antigravity": "^0.5.2",
-    "pi-mcp-adapter": "^2.31.0"
+    "pi-mcp-adapter": "^2.31.0",
+    "typebox": "npm:@sinclair/typebox@^0.34.52"
   }
 }
