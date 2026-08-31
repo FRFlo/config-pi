@@ -32,6 +32,10 @@
     "cloudflare-browser": {
       "url": "https://browser.mcp.cloudflare.com/mcp",
       "directTools": true
+    },
+    "github": {
+      "url": "https://api.githubcopilot.com/mcp",
+      "auth": "oauth"
     }
   }
 }
