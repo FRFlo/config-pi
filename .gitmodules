@@ -16,3 +16,4 @@
 [submodule "git/github.com/FRFlo/pi-quotas"]
 	path = git/github.com/FRFlo/pi-quotas
 	url = https://github.com/FRFlo/pi-quotas.git
+	branch = main
