@@ -1,0 +1,35 @@
+# Secrets - keep local only
+auth.json
+**/auth.json
+.env
+.env.*
+
+# Pi runtime state (created when this repo is used as ~/.pi/agent)
+.pi/
+.memory/
+.senpi/
+sessions/
+mcp-cache.json
+mcp-npx-cache.json
+run-history.jsonl
+session-manager-config.toml
+pi-crash.log
+
+# Dependencies / generated environments
+node_modules/
+**/node_modules/
+.venv/
+**/.venv/
+
+# Python junk
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+tmp/
+*.log
+bin/fd.exe
+bin/rg.exe

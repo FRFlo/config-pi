@@ -1,0 +1,33 @@
+{
+  "lastChangelogVersion": "0.84.4",
+  "theme": "dark",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.5",
+  "packages": [
+    "npm:pi-mcp-adapter",
+    "git:github.com/code-yeongyu/pi-apply-patch",
+    "git:github.com/code-yeongyu/pi-todotools",
+    "git:github.com/code-yeongyu/pi-openai-web-search",
+    "git:github.com/code-yeongyu/pi-nested-agents-md",
+    "npm:pi-antigravity"
+  ],
+  "extensions": [
+    "C:/Users/Flo/.pi/agent/git/github.com/code-yeongyu/senpi/packages/coding-agent/src/core/extensions/builtin/loop-guard",
+    "C:/Users/Flo/.pi/agent/git/github.com/code-yeongyu/senpi/packages/coding-agent/src/core/extensions/builtin/hooks",
+    "C:/Users/Flo/.pi/agent/git/github.com/code-yeongyu/senpi/packages/coding-agent/src/core/extensions/builtin/terminal"
+  ],
+  "observational-memory": {
+    "backend": "sqlite",
+    "models": {
+      "observer": {
+        "provider": "antigravity",
+        "id": "gemini-3.7-flash"
+      },
+      "consolidator": {
+        "provider": "antigravity",
+        "id": "gemini-3.7-flash"
+      }
+    }
+  },
+  "hideThinkingBlock": false
+}
