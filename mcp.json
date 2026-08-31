@@ -1,0 +1,37 @@
+{
+  "mcpServers": {
+    "context7": {
+      "url": "https://mcp.context7.com/mcp",
+      "headers": {
+        "CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}"
+      },
+      "directTools": true
+    },
+    "svelte": {
+      "command": "bunx",
+      "args": [
+        "-y",
+        "@sveltejs/mcp"
+      ]
+    },
+    "gitnexus": {
+      "command": "bunx",
+      "args": [
+        "-y",
+        "gitnexus",
+        "mcp"
+      ]
+    },
+    "grep_app": {
+      "url": "https://mcp.grep.app",
+      "directTools": true
+    },
+    "cloudflare-api": {
+      "url": "https://mcp.cloudflare.com/mcp"
+    },
+    "cloudflare-browser": {
+      "url": "https://browser.mcp.cloudflare.com/mcp",
+      "directTools": true
+    }
+  }
+}

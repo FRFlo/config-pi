@@ -14,6 +14,7 @@ mcp-npx-cache.json
 run-history.jsonl
 session-manager-config.toml
 pi-crash.log
+observational-memory.sqlite
 
 # Dependencies / generated environments
 node_modules/

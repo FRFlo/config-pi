@@ -5,6 +5,7 @@
   "defaultModel": "gpt-5.5",
   "packages": [
     "npm:pi-mcp-adapter",
+    "git:github.com/FRFlo/pi-web-search",
     "git:github.com/code-yeongyu/pi-apply-patch",
     "git:github.com/code-yeongyu/pi-todotools",
     "git:github.com/code-yeongyu/pi-openai-web-search",
