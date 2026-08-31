@@ -1,5 +1,4 @@
 import { getShellEnv } from "./utils/shell.ts";
-export type SettingsManager = any;
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 const isAnthropicBashEnabled = () => false;
 import { TERMINAL_MONITOR_STATE_EVENT, WAKE_SOURCE_STATE_EVENT } from "./monitor-state-event.ts";
@@ -16,7 +15,12 @@ import {
 	TerminalSessionBundle,
 	teardownParkedBundle,
 } from "./session-bundle.ts";
-import { loadTerminalSettings, type ResolvedTerminalSettings, TERMINAL_SETTINGS_DEFAULTS } from "./settings.ts";
+import {
+	getShellPathFromSettings,
+	loadTerminalSettings,
+	type ResolvedTerminalSettings,
+	TERMINAL_SETTINGS_DEFAULTS,
+} from "./settings.ts";
 import { TERMINAL_BASH_TOOL, TERMINAL_COMPANION_TOOLS } from "./shared.ts";
 import { createPtyBashTool } from "./tools/bash.ts";
 import { createBashInputTool } from "./tools/bash-input.ts";
@@ -147,12 +151,15 @@ function shouldStepAside(ctx: ExtensionContext | undefined): boolean {
  * model_select.
  */
 function syncToolset(pi: ExtensionAPI, state: TerminalExtensionState): void {
+	if (typeof (pi as any).getActiveTools !== "function" || typeof (pi as any).setActiveTools !== "function") {
+		return;
+	}
 	const stepAside = shouldStepAside(state.ctx);
-	const active = new Set(pi.getActiveTools());
+	const active = new Set((pi as any).getActiveTools() as string[]);
 	if (stepAside) {
 		for (const companion of TERMINAL_COMPANION_TOOLS) active.add(companion);
 		if (!state.noticeShown) {
-			state.ctx?.ui.notify("native Anthropic bash active — monitor sessions remain available", "info");
+			state.ctx?.ui?.notify?.("native Anthropic bash active — monitor sessions remain available", "info");
 			state.noticeShown = true;
 		}
 	} else {
@@ -161,7 +168,7 @@ function syncToolset(pi: ExtensionAPI, state: TerminalExtensionState): void {
 		state.noticeShown = false;
 	}
 	state.steppedAside = stepAside;
-	pi.setActiveTools([...active]);
+	(pi as any).setActiveTools([...active]);
 }
 
 export function registerTerminalExtension(pi: ExtensionAPI): void {
@@ -173,11 +180,11 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 		statusTicker: new MonitorStatusTicker({
 			render: (status) => {
 				const ctx = state.ctx;
-				ctx?.ui.setStatus(
+				ctx?.ui?.setStatus?.(
 					MONITOR_STATUS_KEY,
-					status === undefined || ctx.mode !== "tui"
+					status === undefined || (ctx as any)?.mode !== "tui"
 						? status
-						: ctx.ui.theme.bg("selectedBg", ctx.ui.theme.fg("text", status)),
+						: (ctx as any)?.ui?.theme?.bg?.("selectedBg", (ctx as any)?.ui?.theme?.fg?.("text", status)),
 				);
 			},
 		}),
@@ -197,9 +204,8 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (event, ctx) => {
 		state.ctx = ctx;
-		const settingsManager = SettingsManager.create(ctx.cwd);
-		state.settings = loadTerminalSettings(settingsManager);
-		state.shellPath = settingsManager.getShellPath();
+		state.settings = loadTerminalSettings(ctx.cwd);
+		state.shellPath = getShellPathFromSettings(ctx.cwd);
 		state.notifier = new TerminalNotifier({
 			sendMessage: (message, options) => pi.sendMessage(message, options),
 			getContext: () => state.ctx,

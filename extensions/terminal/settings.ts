@@ -1,8 +1,24 @@
-import type { SettingsManager, TerminalSettings } from "../../../settings-manager.ts";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
 import { DEFAULT_COLS, DEFAULT_MAX_SESSIONS, DEFAULT_ROWS, DEFAULT_SCROLLBACK } from "./shared.ts";
 
 export type TimeoutAction = "background" | "kill";
 export type NotifyMode = "wake" | "next-turn" | "off";
+
+export interface TerminalSettings {
+	defaultCols?: number;
+	defaultRows?: number;
+	scrollback?: number;
+	maxSessions?: number;
+	timeoutAction?: TimeoutAction;
+	notify?: NotifyMode;
+	monitorCoalesceWindowMs?: number;
+	monitorRateLimitMs?: number;
+	monitorMaxLinesPerInjection?: number;
+	monitorMaxCharsPerInjection?: number;
+	monitorWakeBudget?: number;
+}
 
 export interface MonitorDeliverySettings {
 	readonly coalesceWindowMs: number;
@@ -85,9 +101,43 @@ export function resolveTerminalSettings(raw: TerminalSettings | undefined): Reso
 }
 
 /** Load and merge terminal-tool settings from global + project settings.json. */
-export function loadTerminalSettings(settingsManager: SettingsManager): ResolvedTerminalSettings {
-	const global = settingsManager.getGlobalSettings().terminal;
-	const project = settingsManager.getProjectSettings().terminal;
-	const merged: TerminalSettings = { ...global, ...project };
-	return resolveTerminalSettings(merged);
+export function loadTerminalSettings(cwd?: string): ResolvedTerminalSettings {
+	let raw: TerminalSettings = {};
+	try {
+		const globalPath = path.join(os.homedir(), ".pi", "agent", "settings.json");
+		if (fs.existsSync(globalPath)) {
+			const globalJson = JSON.parse(fs.readFileSync(globalPath, "utf-8"));
+			if (globalJson.terminal) raw = { ...raw, ...globalJson.terminal };
+		}
+		if (cwd) {
+			const projectPath = path.join(cwd, ".pi", "settings.json");
+			if (fs.existsSync(projectPath)) {
+				const projectJson = JSON.parse(fs.readFileSync(projectPath, "utf-8"));
+				if (projectJson.terminal) raw = { ...raw, ...projectJson.terminal };
+			}
+		}
+	} catch {
+		// Ignore parse errors
+	}
+	return resolveTerminalSettings(raw);
+}
+
+export function getShellPathFromSettings(cwd?: string): string | undefined {
+	try {
+		const globalPath = path.join(os.homedir(), ".pi", "agent", "settings.json");
+		if (fs.existsSync(globalPath)) {
+			const globalJson = JSON.parse(fs.readFileSync(globalPath, "utf-8"));
+			if (globalJson.shellPath) return globalJson.shellPath;
+		}
+		if (cwd) {
+			const projectPath = path.join(cwd, ".pi", "settings.json");
+			if (fs.existsSync(projectPath)) {
+				const projectJson = JSON.parse(fs.readFileSync(projectPath, "utf-8"));
+				if (projectJson.shellPath) return projectJson.shellPath;
+			}
+		}
+	} catch {
+		// Ignore
+	}
+	return undefined;
 }
