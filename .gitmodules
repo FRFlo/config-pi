@@ -13,3 +13,6 @@
 [submodule "git/github.com/FRFlo/pi-web-search"]
 	path = git/github.com/FRFlo/pi-web-search
 	url = https://github.com/FRFlo/pi-web-search.git
+[submodule "git/github.com/FRFlo/pi-quotas"]
+	path = git/github.com/FRFlo/pi-quotas
+	url = https://github.com/FRFlo/pi-quotas.git
