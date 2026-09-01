@@ -27,7 +27,8 @@
       "directTools": true
     },
     "cloudflare-api": {
-      "url": "https://mcp.cloudflare.com/mcp"
+      "url": "https://mcp.cloudflare.com/mcp",
+      "directTools": true
     },
     "cloudflare-browser": {
       "url": "https://browser.mcp.cloudflare.com/mcp",
@@ -36,6 +37,10 @@
     "github": {
       "url": "https://api.githubcopilot.com/mcp",
       "auth": "oauth"
+    },
+    "executor": {
+      "url": "https://your-executor-url.example.com",
+      "directTools": true
     }
   }
 }
