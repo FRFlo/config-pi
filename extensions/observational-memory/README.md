@@ -129,9 +129,9 @@ database under `~/.pi/agent/observational-memory.sqlite`, with explicit `(projec
 session_id)` scope columns. Existing Markdown topic/JOURNEY files are imported on first SQLite
 open; set `backend: "files"` to keep the previous file-per-topic behavior.
 
-For git/review, OM also writes a generated Markdown mirror at
-`.memory/<sessionId>/MEMORY.md`. This is the coarse-grained export containing JOURNEY plus all
-durable topic knowledge; commit that file if you want project-local memory history in git.
+For git/review, OM also writes one generated Markdown mirror at `.memory/MEMORY.md` when there is
+actual durable knowledge. This coarse-grained export contains JOURNEY plus all durable topic
+knowledge; commit that file if you want project-local memory history in git.
 
 ## Development
 

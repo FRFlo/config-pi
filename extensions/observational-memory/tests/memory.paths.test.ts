@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -127,7 +127,7 @@ describe("sqlite memory backend", () => {
 		sqliteWriteFile(root, "auth.md", "---\ntitle: Auth\nsummary: JWT\n---\nFull auth knowledge");
 		writeMemorySnapshot(root);
 
-		const snapshot = readFileSync(join(root, "MEMORY.md"), "utf-8");
+		const snapshot = readFileSync(join(cwd, ".memory", "MEMORY.md"), "utf-8");
 		expect(snapshot).toContain("# Observational memory");
 		expect(snapshot).toContain("### Auth");
 		expect(snapshot).toContain("Full auth knowledge");
@@ -137,11 +137,21 @@ describe("sqlite memory backend", () => {
 	it("migrates existing markdown files on first sqlite open", () => {
 		process.env.PI_OM_SQLITE_PATH = join(cwd, "test.sqlite");
 		writeTopic("auth.md", "---\ntitle: Auth\nsummary: migrated\n---\nbody");
+		writeTopic("MEMORY.md", "# generated junk");
 		writeTopic("JOURNEY.md", "legacy journey");
 		initSqliteMemory(root);
 
 		expect(listTopics(root)[0]).toMatchObject({ title: "Auth", summary: "migrated" });
+		expect(listTopics(root).map((t) => t.filename)).toEqual(["auth.md"]);
 		expect(readJourney(root)).toBe("legacy journey");
+	});
+
+	it("does not create empty MEMORY.md mirrors", () => {
+		process.env.PI_OM_SQLITE_PATH = join(cwd, "test.sqlite");
+		initSqliteMemory(root);
+		writeMemorySnapshot(root);
+
+		expect(existsSync(join(cwd, ".memory", "MEMORY.md"))).toBe(false);
 	});
 });
 

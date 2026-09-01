@@ -29,6 +29,11 @@ function portable(path: string): string {
 }
 
 const FRONT_MATTER_RE = /^---\n([\s\S]*?)\n---\n?/;
+const RESERVED_FILES = new Set(["INDEX.md", "JOURNEY.md", "MEMORY.md"]);
+
+function isReservedTopicFile(filename: string): boolean {
+	return RESERVED_FILES.has(filename);
+}
 
 function parseTopicFrontMatter(content: string): TopicFrontMatter {
 	const match = FRONT_MATTER_RE.exec(content);
@@ -101,6 +106,10 @@ function open(root: string): { db: DatabaseSync; scope: MemoryScope } {
 		scope.sessionId,
 		Date.now(),
 	);
+	db.prepare("DELETE FROM topics WHERE project_root=? AND session_id=? AND filename='MEMORY.md'").run(
+		scope.projectRoot,
+		scope.sessionId,
+	);
 	migrateFilesIfPresent(root, db, scope);
 	return { db, scope };
 }
@@ -119,7 +128,7 @@ function migrateFilesIfPresent(root: string, db: DatabaseSync, scope: MemoryScop
 	) as { n: number };
 	if (topicCount.n === 0) {
 		for (const filename of readdirSync(root)) {
-			if (!filename.endsWith(".md") || filename === "INDEX.md" || filename === "JOURNEY.md") continue;
+			if (!filename.endsWith(".md") || isReservedTopicFile(filename)) continue;
 			const content = readFileSync(join(root, filename), "utf-8");
 			const front = parseTopicFrontMatter(content);
 			db.prepare(`INSERT OR IGNORE INTO topics(project_root, session_id, filename, id, title, summary, updated, content, updated_at)
@@ -244,6 +253,7 @@ export function readSqliteRunCost(root: string, runId: string): number | undefin
 export function sqliteReadFile(root: string, path: string): string | undefined {
 	const filename = basename(path);
 	if (filename === "JOURNEY.md") return sqliteReadJourney(root);
+	if (isReservedTopicFile(filename)) return undefined;
 	return close(root, (db, s) => {
 		const row = db.prepare("SELECT content FROM topics WHERE project_root=? AND session_id=? AND filename=?").get(
 			s.projectRoot,
@@ -260,6 +270,7 @@ export function sqliteWriteFile(root: string, path: string, content: string): vo
 		sqliteWriteJourney(root, content);
 		return;
 	}
+	if (isReservedTopicFile(filename)) return;
 	const front = parseTopicFrontMatter(content);
 	close(root, (db, s) => {
 		db.prepare(`INSERT INTO topics(project_root, session_id, filename, id, title, summary, updated, content, updated_at)
@@ -286,7 +297,7 @@ export function sqliteListFiles(root: string): string[] {
 			s.projectRoot,
 			s.sessionId,
 		) as Row[];
-		const files = rows.map((r) => String(r.filename));
+		const files = rows.map((r) => String(r.filename)).filter((filename) => !isReservedTopicFile(filename));
 		const journey = db.prepare("SELECT body FROM journey WHERE project_root=? AND session_id=?").get(
 			s.projectRoot,
 			s.sessionId,
@@ -302,7 +313,7 @@ export function sqliteListTopics(root: string): Topic[] {
 			s.projectRoot,
 			s.sessionId,
 		) as Row[];
-		return rows.map((r) => ({
+		return rows.filter((r) => !isReservedTopicFile(String(r.filename))).map((r) => ({
 			filename: String(r.filename),
 			path: portable(relative(s.projectRoot, join(resolve(root), String(r.filename)))),
 			id: typeof r.id === "string" ? r.id : undefined,

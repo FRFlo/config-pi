@@ -47,7 +47,7 @@ export function journeyPath(root: string): string {
 }
 
 export function snapshotPath(root: string): string {
-	return join(root, SNAPSHOT_FILENAME);
+	return join(resolve(root, ".."), SNAPSHOT_FILENAME);
 }
 
 /** Read `.memory/JOURNEY.md` body, trimmed. Returns undefined when missing or effectively empty. */

@@ -104,7 +104,7 @@ export function registerConsolidatorTools(pi: ExtensionAPI, memoryRoot: string):
 		async execute(_id: string, params: WriteInput): Promise<ToolText> {
 			const abs = scoped(root, params.path);
 			if (!abs) return fail("path escapes .memory/");
-			if (/(^|[/\\])INDEX\.md$/i.test(params.path)) return fail("INDEX.md is generated automatically; do not write it");
+			if (/(^|[/\\])(INDEX|MEMORY)\.md$/i.test(params.path)) return fail("INDEX.md and MEMORY.md are generated automatically; do not write them");
 			if (sqlite) {
 				sqliteWriteFile(root, params.path, params.content);
 				return ok(`Wrote ${params.path} (${params.content.length} bytes).`);
@@ -122,7 +122,7 @@ export function registerConsolidatorTools(pi: ExtensionAPI, memoryRoot: string):
 		async execute(_id: string, params: EditInput): Promise<ToolText> {
 			const abs = scoped(root, params.path);
 			if (!abs) return fail("path escapes .memory/");
-			if (/(^|[/\\])INDEX\.md$/i.test(params.path)) return fail("INDEX.md is generated automatically; do not edit it");
+			if (/(^|[/\\])(INDEX|MEMORY)\.md$/i.test(params.path)) return fail("INDEX.md and MEMORY.md are generated automatically; do not edit them");
 			if (sqlite) {
 				const current = sqliteReadFile(root, params.path);
 				if (current === undefined) return fail(`no such file: ${params.path}`);
