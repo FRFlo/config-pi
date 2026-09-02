@@ -26,12 +26,12 @@
       }
     }
   },
-  "hermes": {
-    "enabled": false,
-    "endpoint": "https://your-hermes-url.example.com",
+  "discordBridge": {
+    "enabled": true,
+    "endpoint": "https://your-bridge-url.example.com",
     "apiKey": "your-bridge-api-key",
     "timeoutSeconds": 45,
-    "model": "hermes-agent"
+    "threadId": "1544798185468334180"
   },
   "hideThinkingBlock": false
 }

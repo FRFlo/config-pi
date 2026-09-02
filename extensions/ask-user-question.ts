@@ -9,7 +9,11 @@ import {
 	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { askHermesQuestion, loadHermesConfig } from "./hermes";
+import {
+	type AnswerItem,
+	askDiscordQuestion,
+	loadDiscordBridgeConfig,
+} from "./discord-bridge";
 
 interface AskOption {
 	label: string;
@@ -78,6 +82,11 @@ const AskUserQuestionParams = Type.Object({
 			description: "Optional extra context or instructions shown under the question.",
 		}),
 	),
+	context: Type.Optional(
+		Type.String({
+			description: "Optional summary of relevant task context or code snippet to help the user decide.",
+		}),
+	),
 	options: Type.Optional(
 		Type.Array(OptionSchema, {
 			description:
@@ -118,37 +127,10 @@ function createEditorTheme(theme: any): EditorTheme {
 	};
 }
 
-function addWrapped(lines: string[], text: string, width: number, indent = ""): void {
-	const contentWidth = Math.max(1, width - indent.length);
-	for (const line of wrapTextWithAnsi(text, contentWidth)) {
-		lines.push(truncateToWidth(`${indent}${line}`, width));
+function addWrapped(lines: string[], text: string, width: number, indent = " ") {
+	for (const line of wrapTextWithAnsi(text, Math.max(1, width - indent.length))) {
+		lines.push(`${indent}${line}`);
 	}
-}
-
-function formatAnswerForModel(answer: AskAnswer): string {
-	switch (answer.type) {
-		case "text":
-			return answer.label;
-		case "other":
-			return `Other: ${answer.label}`;
-		case "option":
-			return `${answer.index}. ${answer.label}`;
-	}
-}
-
-function answerSortRank(answer: AskAnswer): number {
-	switch (answer.type) {
-		case "option":
-			return answer.index;
-		case "other":
-			return Number.MAX_SAFE_INTEGER - 1;
-		case "text":
-			return Number.MAX_SAFE_INTEGER;
-	}
-}
-
-function sortAnswers(answers: AskAnswer[]): AskAnswer[] {
-	return [...answers].sort((a, b) => answerSortRank(a) - answerSortRank(b));
 }
 
 function buildStructuredResult(
@@ -158,7 +140,7 @@ function buildStructuredResult(
 	answers: AskAnswer[],
 	context?: string,
 	message?: string,
-) {
+): AskUserQuestionResultDetails {
 	return {
 		status,
 		question,
@@ -166,14 +148,14 @@ function buildStructuredResult(
 		mode,
 		answers,
 		message,
-	} as AskUserQuestionResultDetails;
+	};
 }
 
-function cancelledResult(question: string, mode: AskUserQuestionMode, context?: string) {
-	const message = "User cancelled the question";
+function cancelledResult(question: string, mode: AskUserQuestionMode, context?: string, message?: string) {
+	const cancelMsg = message || "User cancelled the question prompt";
 	return {
-		content: [{ type: "text" as const, text: message }],
-		details: buildStructuredResult("cancelled", question, mode, [], context, message),
+		content: [{ type: "text" as const, text: cancelMsg }],
+		details: buildStructuredResult("cancelled", question, mode, [], context, cancelMsg),
 	};
 }
 
@@ -184,19 +166,32 @@ function unavailableResult(question: string, mode: AskUserQuestionMode, message:
 	};
 }
 
-function buildResult(question: string, context: string | undefined, mode: AskUserQuestionMode, answers: AskAnswer[]) {
-	let text: string;
-	if (mode === "text") {
-		const answer = answers[0];
-		text = answer.label.trim().length > 0 ? `User answered: ${answer.label}` : "User submitted an empty response";
-	} else if (mode === "single-select") {
-		text = `User selected: ${formatAnswerForModel(answers[0])}`;
-	} else {
-		text = `User selected:\n${answers.map((answer) => `- ${formatAnswerForModel(answer)}`).join("\n")}`;
+function formatAnswersForContent(answers: AskAnswer[]): string {
+	if (answers.length === 0) return "No answer provided";
+	if (answers.length === 1) {
+		const a = answers[0];
+		if (a.type === "option") return `${a.index}. ${a.label}`;
+		if (a.type === "other") return `Other: ${a.label}`;
+		return a.label;
 	}
 
+	return answers
+		.map((a) => {
+			if (a.type === "option") return `- ${a.index}. ${a.label}`;
+			if (a.type === "other") return `- Other: ${a.label}`;
+			return `- ${a.label}`;
+		})
+		.join("\n");
+}
+
+function buildResult(
+	question: string,
+	context: string | undefined,
+	mode: AskUserQuestionMode,
+	answers: AskAnswer[],
+) {
 	return {
-		content: [{ type: "text" as const, text }],
+		content: [{ type: "text" as const, text: formatAnswersForContent(answers) }],
 		details: buildStructuredResult("answered", question, mode, answers, context),
 	};
 }
@@ -204,12 +199,13 @@ function buildResult(question: string, context: string | undefined, mode: AskUse
 async function askTextMode(
 	ctx: any,
 	question: string,
+	details: string | undefined,
 	context: string | undefined,
-): Promise<AskAnswer | null> {
-	const hermesConfig = loadHermesConfig();
-	const timeoutSeconds = hermesConfig.enabled !== false ? hermesConfig.timeoutSeconds || 45 : 0;
+): Promise<{ answers: AskAnswer[] | null; retry?: boolean }> {
+	const discordConfig = loadDiscordBridgeConfig();
+	const timeoutSeconds = discordConfig.enabled !== false ? discordConfig.timeoutSeconds || 45 : 0;
 
-	return ctx.ui.custom<AskAnswer | null>((tui: any, theme: any, _kb: any, done: (result: AskAnswer | null) => void) => {
+	return ctx.ui.custom<{ answers: AskAnswer[] | null; retry?: boolean }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null; retry?: boolean }) => void) => {
 		let cachedLines: string[] | undefined;
 		let cachedWidth = -1;
 		let finished = false;
@@ -218,7 +214,7 @@ async function askTextMode(
 		const abortCtrl = new AbortController();
 		const editor = new Editor(tui, createEditorTheme(theme));
 
-		function safeDone(result: AskAnswer | null) {
+		function safeDone(result: { answers: AskAnswer[] | null; retry?: boolean }) {
 			if (finished) return;
 			finished = true;
 			if (timer) clearTimeout(timer);
@@ -229,10 +225,10 @@ async function askTextMode(
 		editor.onSubmit = (value) => {
 			const trimmed = value.trim();
 			if (!trimmed) {
-				safeDone(null);
+				safeDone({ answers: null });
 				return;
 			}
-			safeDone({ type: "text", label: trimmed, value: trimmed });
+			safeDone({ answers: [{ type: "text", label: trimmed, value: trimmed }] });
 		};
 
 		function refresh() {
@@ -240,25 +236,43 @@ async function askTextMode(
 			tui.requestRender();
 		}
 
-		if (timeoutSeconds > 0 && hermesConfig.baseUrl) {
+		if (timeoutSeconds > 0 && discordConfig.endpoint) {
 			timer = setTimeout(() => {
 				if (finished) return;
-				delegationStatus = "Délégation à Hermes en cours sur Discord...";
+				delegationStatus = "Délégation à Discord en cours via pi-bridge...";
 				refresh();
 
-				askHermesQuestion({ question, details: context }, abortCtrl.signal, hermesConfig)
+				askDiscordQuestion(
+					{
+						question,
+						details,
+						context,
+						timeoutSeconds: 300,
+					},
+					abortCtrl.signal,
+					discordConfig,
+				)
 					.then((res) => {
 						if (abortCtrl.signal.aborted || finished) return;
-						if (res.ok && res.rawAnswer) {
-							safeDone({ type: "text", label: res.rawAnswer, value: res.rawAnswer });
+						if (res.status === "answered" && res.answers.length > 0) {
+							const mappedAnswers: AskAnswer[] = res.answers.map((a) => ({
+								type: "text",
+								label: a.label,
+								value: a.value,
+							}));
+							safeDone({ answers: mappedAnswers });
+						} else if (res.status === "retry") {
+							safeDone({ answers: null, retry: true });
+						} else if (res.status === "cancelled") {
+							safeDone({ answers: null });
 						} else {
-							delegationStatus = `Erreur Hermes: ${res.error || "Pas de réponse"}`;
+							delegationStatus = `Erreur Discord: ${res.error || "Pas de réponse"}`;
 							refresh();
 						}
 					})
 					.catch((err) => {
 						if (!abortCtrl.signal.aborted && !finished) {
-							delegationStatus = `Erreur Hermes: ${err.message || String(err)}`;
+							delegationStatus = `Erreur Discord: ${err.message || String(err)}`;
 							refresh();
 						}
 					});
@@ -267,7 +281,7 @@ async function askTextMode(
 
 		function handleInput(data: string) {
 			if (matchesKey(data, Key.escape)) {
-				safeDone(null);
+				safeDone({ answers: null });
 				return;
 			}
 			editor.handleInput(data);
@@ -282,17 +296,21 @@ async function askTextMode(
 
 			add(theme.fg("accent", "─".repeat(width)));
 			addWrapped(lines, theme.fg("text", ` ${question}`), width);
+			if (details) {
+				lines.push("");
+				addWrapped(lines, theme.fg("muted", ` ${details}`), width);
+			}
 			if (context) {
 				lines.push("");
-				addWrapped(lines, theme.fg("muted", ` ${context}`), width);
+				addWrapped(lines, theme.fg("dim", ` Contexte: ${context}`), width);
 			}
 			lines.push("");
 
 			if (delegationStatus) {
-				add(theme.fg("warning", ` 🤖 [Hermes] ${delegationStatus}`));
+				add(theme.fg("warning", ` 🤖 [Discord Relay] ${delegationStatus}`));
 				lines.push("");
 			} else if (timeoutSeconds > 0) {
-				add(theme.fg("dim", ` (Délégation Hermes/Discord si inactif pendant ${timeoutSeconds}s)`));
+				add(theme.fg("dim", ` (Délégation Discord si inactif pendant ${timeoutSeconds}s)`));
 				lines.push("");
 			}
 
@@ -322,19 +340,24 @@ async function askTextMode(
 async function askSingleChoice(
 	ctx: any,
 	question: string,
+	details: string | undefined,
 	context: string | undefined,
 	options: AskOption[],
-): Promise<AskAnswer | null> {
+): Promise<{ answers: AskAnswer[] | null; retry?: boolean }> {
 	const otherLabel = getOtherLabel(options);
 	const allOptions: DisplayOption[] = [
-		...options.map((option, index) => ({ ...option, id: `option:${index}`, index: index + 1 })),
+		...options.map((option, index) => ({
+			...option,
+			id: `option:${index}`,
+			index: index + 1,
+		})),
 		{ id: "other", label: otherLabel, value: "__other__", isOther: true },
 	];
 
-	const hermesConfig = loadHermesConfig();
-	const timeoutSeconds = hermesConfig.enabled !== false ? hermesConfig.timeoutSeconds || 45 : 0;
+	const discordConfig = loadDiscordBridgeConfig();
+	const timeoutSeconds = discordConfig.enabled !== false ? discordConfig.timeoutSeconds || 45 : 0;
 
-	return ctx.ui.custom<AskAnswer | null>((tui: any, theme: any, _kb: any, done: (result: AskAnswer | null) => void) => {
+	return ctx.ui.custom<{ answers: AskAnswer[] | null; retry?: boolean }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null; retry?: boolean }) => void) => {
 		let optionIndex = 0;
 		let editMode = false;
 		let cachedLines: string[] | undefined;
@@ -345,7 +368,7 @@ async function askSingleChoice(
 		const abortCtrl = new AbortController();
 		const editor = new Editor(tui, createEditorTheme(theme));
 
-		function safeDone(result: AskAnswer | null) {
+		function safeDone(result: { answers: AskAnswer[] | null; retry?: boolean }) {
 			if (finished) return;
 			finished = true;
 			if (timer) clearTimeout(timer);
@@ -356,7 +379,7 @@ async function askSingleChoice(
 		editor.onSubmit = (value) => {
 			const trimmed = value.trim();
 			if (!trimmed) return;
-			safeDone({ type: "other", label: trimmed, value: trimmed });
+			safeDone({ answers: [{ type: "other", label: trimmed, value: trimmed }] });
 		};
 
 		function refresh() {
@@ -364,39 +387,63 @@ async function askSingleChoice(
 			tui.requestRender();
 		}
 
-		if (timeoutSeconds > 0 && hermesConfig.baseUrl) {
+		if (timeoutSeconds > 0 && discordConfig.endpoint) {
 			timer = setTimeout(() => {
 				if (finished) return;
-				delegationStatus = "Question déléguée à Hermes sur Discord...";
+				delegationStatus = "Question déléguée à Discord via pi-bridge...";
 				refresh();
 
-				askHermesQuestion({ question, details: context, options }, abortCtrl.signal, hermesConfig)
+				askDiscordQuestion(
+					{
+						question,
+						details,
+						context,
+						options,
+						multiSelect: false,
+						timeoutSeconds: 300,
+					},
+					abortCtrl.signal,
+					discordConfig,
+				)
 					.then((res) => {
 						if (abortCtrl.signal.aborted || finished) return;
-						if (res.ok) {
-							if (res.matchedOptionIndex !== undefined) {
-								const opt = options[res.matchedOptionIndex];
+						if (res.status === "answered" && res.answers.length > 0) {
+							const ans = res.answers[0];
+							if (ans.type === "option" && ans.index) {
+								const opt = options[ans.index - 1] || { label: ans.label, value: ans.value };
 								safeDone({
-									type: "option",
-									label: opt.label,
-									value: opt.value,
-									index: res.matchedOptionIndex + 1,
+									answers: [
+										{
+											type: "option",
+											label: opt.label,
+											value: opt.value,
+											index: ans.index,
+										},
+									],
 								});
-							} else if (res.rawAnswer) {
+							} else {
 								safeDone({
-									type: "other",
-									label: res.rawAnswer,
-									value: res.rawAnswer,
+									answers: [
+										{
+											type: "other",
+											label: ans.label,
+											value: ans.value,
+										},
+									],
 								});
 							}
+						} else if (res.status === "retry") {
+							safeDone({ answers: null, retry: true });
+						} else if (res.status === "cancelled") {
+							safeDone({ answers: null });
 						} else {
-							delegationStatus = `Erreur Hermes: ${res.error || "Pas de réponse"}`;
+							delegationStatus = `Erreur Discord: ${res.error || "Pas de réponse"}`;
 							refresh();
 						}
 					})
 					.catch((err) => {
 						if (!abortCtrl.signal.aborted && !finished) {
-							delegationStatus = `Erreur Hermes: ${err.message || String(err)}`;
+							delegationStatus = `Erreur Discord: ${err.message || String(err)}`;
 							refresh();
 						}
 					});
@@ -435,15 +482,19 @@ async function askSingleChoice(
 					return;
 				}
 				safeDone({
-					type: "option",
-					label: selected.label,
-					value: selected.value,
-					index: selected.index!,
+					answers: [
+						{
+							type: "option",
+							label: selected.label,
+							value: selected.value,
+							index: selected.index!,
+						},
+					],
 				});
 				return;
 			}
 			if (matchesKey(data, Key.escape)) {
-				safeDone(null);
+				safeDone({ answers: null });
 			}
 		}
 
@@ -455,26 +506,31 @@ async function askSingleChoice(
 
 			add(theme.fg("accent", "─".repeat(width)));
 			addWrapped(lines, theme.fg("text", ` ${question}`), width);
+			if (details) {
+				lines.push("");
+				addWrapped(lines, theme.fg("muted", ` ${details}`), width);
+			}
 			if (context) {
 				lines.push("");
-				addWrapped(lines, theme.fg("muted", ` ${context}`), width);
+				addWrapped(lines, theme.fg("dim", ` Contexte: ${context}`), width);
 			}
 			lines.push("");
 
 			if (delegationStatus) {
-				add(theme.fg("warning", ` 🤖 [Hermes] ${delegationStatus}`));
+				add(theme.fg("warning", ` 🤖 [Discord Relay] ${delegationStatus}`));
 				lines.push("");
 			} else if (timeoutSeconds > 0) {
-				add(theme.fg("dim", ` (Délégation Hermes/Discord si inactif pendant ${timeoutSeconds}s)`));
+				add(theme.fg("dim", ` (Délégation Discord si inactif pendant ${timeoutSeconds}s)`));
 				lines.push("");
 			}
 
 			for (let i = 0; i < allOptions.length; i++) {
 				const option = allOptions[i];
-				const selected = i === optionIndex;
-				const prefix = selected ? theme.fg("accent", "> ") : "  ";
-				const label = option.isOther ? option.label : `${option.index}. ${option.label}`;
-				const styled = selected ? theme.fg("accent", label) : theme.fg("text", label);
+				const isFocused = i === optionIndex;
+				const isOther = Boolean(option.isOther);
+				const prefix = isFocused ? theme.fg("accent", "> ") : "  ";
+				const label = isOther ? option.label : `${option.index}. ${option.label}`;
+				const styled = isFocused ? theme.bold(theme.fg("accent", label)) : theme.fg("text", label);
 				add(`${prefix}${styled}`);
 				if (option.description) {
 					addWrapped(lines, theme.fg("muted", option.description), width, "     ");
@@ -510,12 +566,22 @@ async function askSingleChoice(
 	});
 }
 
+function sortAnswers(answers: AskAnswer[]): AskAnswer[] {
+	return [...answers].sort((a, b) => {
+		if (a.type === "option" && b.type === "option") return a.index - b.index;
+		if (a.type === "option") return -1;
+		if (b.type === "option") return 1;
+		return 0;
+	});
+}
+
 async function askMultiChoice(
 	ctx: any,
 	question: string,
+	details: string | undefined,
 	context: string | undefined,
 	options: AskOption[],
-): Promise<AskAnswer[] | null> {
+): Promise<{ answers: AskAnswer[] | null; retry?: boolean }> {
 	const otherLabel = getOtherLabel(options);
 	const choiceItems: DisplayOption[] = options.map((option, index) => ({
 		...option,
@@ -534,10 +600,10 @@ async function askMultiChoice(
 		submitItem,
 	];
 
-	const hermesConfig = loadHermesConfig();
-	const timeoutSeconds = hermesConfig.enabled !== false ? hermesConfig.timeoutSeconds || 45 : 0;
+	const discordConfig = loadDiscordBridgeConfig();
+	const timeoutSeconds = discordConfig.enabled !== false ? discordConfig.timeoutSeconds || 45 : 0;
 
-	return ctx.ui.custom<AskAnswer[] | null>((tui: any, theme: any, _kb: any, done: (result: AskAnswer[] | null) => void) => {
+	return ctx.ui.custom<{ answers: AskAnswer[] | null; retry?: boolean }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null; retry?: boolean }) => void) => {
 		let optionIndex = 0;
 		let editMode = false;
 		let cachedLines: string[] | undefined;
@@ -549,7 +615,7 @@ async function askMultiChoice(
 		const selected = new Map<string, AskAnswer>();
 		const editor = new Editor(tui, createEditorTheme(theme));
 
-		function safeDone(result: AskAnswer[] | null) {
+		function safeDone(result: { answers: AskAnswer[] | null; retry?: boolean }) {
 			if (finished) return;
 			finished = true;
 			if (timer) clearTimeout(timer);
@@ -570,47 +636,56 @@ async function askMultiChoice(
 			tui.requestRender();
 		}
 
-		if (timeoutSeconds > 0 && hermesConfig.baseUrl) {
+		if (timeoutSeconds > 0 && discordConfig.endpoint) {
 			timer = setTimeout(() => {
 				if (finished) return;
-				delegationStatus = "Question déléguée à Hermes sur Discord...";
+				delegationStatus = "Question déléguée à Discord via pi-bridge...";
 				refresh();
 
-				askHermesQuestion(
-					{ question, details: context, options, multiSelect: true },
+				askDiscordQuestion(
+					{
+						question,
+						details,
+						context,
+						options,
+						multiSelect: true,
+						timeoutSeconds: 300,
+					},
 					abortCtrl.signal,
-					hermesConfig,
+					discordConfig,
 				)
 					.then((res) => {
 						if (abortCtrl.signal.aborted || finished) return;
-						if (res.ok) {
-							if (res.matchedOptionIndex !== undefined) {
-								const opt = options[res.matchedOptionIndex];
-								safeDone([
-									{
+						if (res.status === "answered" && res.answers.length > 0) {
+							const mappedAnswers: AskAnswer[] = res.answers.map((ans) => {
+								if (ans.type === "option" && ans.index) {
+									const opt = options[ans.index - 1] || { label: ans.label, value: ans.value };
+									return {
 										type: "option",
 										label: opt.label,
 										value: opt.value,
-										index: res.matchedOptionIndex + 1,
-									},
-								]);
-							} else if (res.rawAnswer) {
-								safeDone([
-									{
-										type: "other",
-										label: res.rawAnswer,
-										value: res.rawAnswer,
-									},
-								]);
-							}
+										index: ans.index,
+									};
+								}
+								return {
+									type: "other",
+									label: ans.label,
+									value: ans.value,
+								};
+							});
+							safeDone({ answers: sortAnswers(mappedAnswers) });
+						} else if (res.status === "retry") {
+							safeDone({ answers: null, retry: true });
+						} else if (res.status === "cancelled") {
+							safeDone({ answers: null });
 						} else {
-							delegationStatus = `Erreur Hermes: ${res.error || "Pas de réponse"}`;
+							delegationStatus = `Erreur Discord: ${res.error || "Pas de réponse"}`;
 							refresh();
 						}
 					})
 					.catch((err) => {
 						if (!abortCtrl.signal.aborted && !finished) {
-							delegationStatus = `Erreur Hermes: ${err.message || String(err)}`;
+							delegationStatus = `Erreur Discord: ${err.message || String(err)}`;
 							refresh();
 						}
 					});
@@ -635,7 +710,7 @@ async function askMultiChoice(
 			if (editMode) {
 				if (matchesKey(data, Key.escape)) {
 					editMode = false;
-					editor.setText(selected.get("other")?.label || "");
+					editor.setText("");
 					refresh();
 					return;
 				}
@@ -676,7 +751,7 @@ async function askMultiChoice(
 			if (matchesKey(data, Key.enter)) {
 				if (current.isSubmit) {
 					if (selected.size > 0) {
-						safeDone(sortAnswers(Array.from(selected.values())));
+						safeDone({ answers: sortAnswers(Array.from(selected.values())) });
 					}
 					return;
 				}
@@ -691,7 +766,7 @@ async function askMultiChoice(
 			}
 
 			if (matchesKey(data, Key.escape)) {
-				safeDone(null);
+				safeDone({ answers: null });
 			}
 		}
 
@@ -703,17 +778,21 @@ async function askMultiChoice(
 
 			add(theme.fg("accent", "─".repeat(width)));
 			addWrapped(lines, theme.fg("text", ` ${question}`), width);
+			if (details) {
+				lines.push("");
+				addWrapped(lines, theme.fg("muted", ` ${details}`), width);
+			}
 			if (context) {
 				lines.push("");
-				addWrapped(lines, theme.fg("muted", ` ${context}`), width);
+				addWrapped(lines, theme.fg("dim", ` Contexte: ${context}`), width);
 			}
 			lines.push("");
 
 			if (delegationStatus) {
-				add(theme.fg("warning", ` 🤖 [Hermes] ${delegationStatus}`));
+				add(theme.fg("warning", ` 🤖 [Discord Relay] ${delegationStatus}`));
 				lines.push("");
 			} else if (timeoutSeconds > 0) {
-				add(theme.fg("dim", ` (Délégation Hermes/Discord si inactif pendant ${timeoutSeconds}s)`));
+				add(theme.fg("dim", ` (Délégation Discord si inactif pendant ${timeoutSeconds}s)`));
 				lines.push("");
 			}
 
@@ -823,7 +902,8 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const options = normalizeOptions(params.options);
-			const context = params.details?.trim() || undefined;
+			const details = params.details?.trim() || undefined;
+			const context = params.context?.trim() || undefined;
 			const mode: AskUserQuestionMode = options.length === 0 ? "text" : params.multiSelect ? "multi-select" : "single-select";
 
 			if (signal?.aborted) {
@@ -836,26 +916,35 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 
 			return withUILock(async () => {
 				if (mode === "text") {
-					const answer = await askTextMode(ctx, params.question, context);
-					if (answer === null) {
+					const res = await askTextMode(ctx, params.question, details, context);
+					if (res.retry) {
+						return cancelledResult(params.question, mode, context, "Action interrompue pour forker / réessayer la session depuis Discord.");
+					}
+					if (!res.answers) {
 						return cancelledResult(params.question, mode, context);
 					}
-					return buildResult(params.question, context, mode, [answer]);
+					return buildResult(params.question, context, mode, res.answers);
 				}
 
 				if (mode === "single-select") {
-					const answer = await askSingleChoice(ctx, params.question, context, options);
-					if (!answer) {
+					const res = await askSingleChoice(ctx, params.question, details, context, options);
+					if (res.retry) {
+						return cancelledResult(params.question, mode, context, "Action interrompue pour forker / réessayer la session depuis Discord.");
+					}
+					if (!res.answers) {
 						return cancelledResult(params.question, mode, context);
 					}
-					return buildResult(params.question, context, mode, [answer]);
+					return buildResult(params.question, context, mode, res.answers);
 				}
 
-				const answers = await askMultiChoice(ctx, params.question, context, options);
-				if (!answers) {
+				const res = await askMultiChoice(ctx, params.question, details, context, options);
+				if (res.retry) {
+					return cancelledResult(params.question, mode, context, "Action interrompue pour forker / réessayer la session depuis Discord.");
+				}
+				if (!res.answers) {
 					return cancelledResult(params.question, mode, context);
 				}
-				return buildResult(params.question, context, mode, answers);
+				return buildResult(params.question, context, mode, res.answers);
 			});
 		},
 
@@ -867,7 +956,13 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 			}
 			if (options.length > 0) {
 				const labels = [...options.map((option) => option.label), getOtherLabel(options)].join(", ");
-				text += `\n${theme.fg("dim", `  Options: ${labels}`)}`;
+				text += `\n${theme.fg("dim", "options: ")}${theme.fg("text", labels)}`;
+			}
+			if (args.details) {
+				text += `\n${theme.fg("dim", "details: ")}${theme.fg("muted", args.details)}`;
+			}
+			if (args.context) {
+				text += `\n${theme.fg("dim", "context: ")}${theme.fg("muted", args.context)}`;
 			}
 			return new Text(text, 0, 0);
 		},
@@ -875,29 +970,18 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 		renderResult(result, _options, theme) {
 			const details = result.details as AskUserQuestionResultDetails | undefined;
 			if (!details) {
-				const first = result.content[0];
-				return new Text(first?.type === "text" ? first.text : "", 0, 0);
+				return new Text(result.content?.[0]?.text || "", 0, 0);
 			}
 
 			if (details.status === "cancelled") {
-				return new Text(theme.fg("warning", details.message || "Cancelled"), 0, 0);
+				return new Text(theme.fg("warning", `Cancelled: ${details.message || "No answer"}`), 0, 0);
 			}
-
 			if (details.status === "unavailable") {
-				return new Text(theme.fg("warning", details.message || "ask_user_question unavailable"), 0, 0);
+				return new Text(theme.fg("error", `Unavailable: ${details.message || "UI required"}`), 0, 0);
 			}
 
-			const lines = details.answers.map((answer) => {
-				switch (answer.type) {
-					case "text":
-						return `${theme.fg("success", "✓ ")}${theme.fg("accent", answer.label || "(empty response)")}`;
-					case "other":
-						return `${theme.fg("success", "✓ ")}${theme.fg("muted", "Other: ")}${theme.fg("accent", answer.label)}`;
-					case "option":
-						return `${theme.fg("success", "✓ ")}${theme.fg("accent", `${answer.index}. ${answer.label}`)}`;
-				}
-			});
-			return new Text(lines.join("\n"), 0, 0);
+			const answerSummary = formatAnswersForContent(details.answers);
+			return new Text(theme.fg("success", "✓ ") + theme.fg("text", answerSummary), 0, 0);
 		},
 	});
 }
