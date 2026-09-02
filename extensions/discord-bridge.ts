@@ -55,7 +55,7 @@ export function loadDiscordBridgeConfig(): DiscordBridgeConfig {
 		endpoint: process.env.PI_BRIDGE_ENDPOINT || "https://your-bridge-url.example.com",
 		apiKey: process.env.PI_BRIDGE_API_KEY || "",
 		timeoutSeconds: 45,
-		threadId: "1544798185468334180",
+		threadId: "your-discord-channel-id",
 	};
 
 	try {

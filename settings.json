@@ -31,7 +31,7 @@
     "endpoint": "https://your-bridge-url.example.com",
     "apiKey": "your-bridge-api-key",
     "timeoutSeconds": 45,
-    "threadId": "1544798185468334180"
+    "threadId": "your-discord-channel-id"
   },
   "hideThinkingBlock": false
 }
