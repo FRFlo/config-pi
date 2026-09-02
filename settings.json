@@ -27,7 +27,7 @@
     }
   },
   "hermes": {
-    "enabled": true,
+    "enabled": false,
     "endpoint": "https://your-hermes-url.example.com",
     "apiKey": "your-bridge-api-key",
     "timeoutSeconds": 45,
