@@ -41,6 +41,9 @@
     "executor": {
       "url": "https://your-executor-url.example.com",
       "directTools": true
+    },
+    "posthog": {
+      "url": "https://mcp.posthog.com/mcp"
     }
   }
 }

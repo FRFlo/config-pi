@@ -1,8 +1,8 @@
 {
   "lastChangelogVersion": "0.84.4",
   "theme": "dark",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.5",
+  "defaultProvider": "antigravity",
+  "defaultModel": "gemini-3.7-flash",
   "packages": [
     "npm:pi-mcp-adapter",
     "git:github.com/FRFlo/pi-web-search",
