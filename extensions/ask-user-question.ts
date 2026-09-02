@@ -110,6 +110,45 @@ function normalizeOptions(options: Array<{ label: string; value?: string; descri
 		.filter((option) => option.label.length > 0);
 }
 
+function extractRecentConversation(sessionManager?: any, maxCount = 6): Array<{ role: string; content: string }> {
+	if (!sessionManager) return [];
+	try {
+		const branch = (typeof sessionManager.getBranch === "function"
+			? sessionManager.getBranch()
+			: typeof sessionManager.getEntries === "function"
+			? sessionManager.getEntries()
+			: []) as Array<any>;
+
+		const messages: Array<{ role: string; content: string }> = [];
+
+		for (let i = branch.length - 1; i >= 0; i--) {
+			const entry = branch[i];
+			if (entry?.type === "message" && entry.message) {
+				const msg = entry.message;
+				if (msg.role === "user" || msg.role === "assistant") {
+					let text = "";
+					if (typeof msg.content === "string") {
+						text = msg.content;
+					} else if (Array.isArray(msg.content)) {
+						text = msg.content
+							.filter((c: any) => c.type === "text" && c.text)
+							.map((c: any) => c.text)
+							.join("\n");
+					}
+					text = text.trim();
+					if (text) {
+						messages.unshift({ role: msg.role, content: text });
+					}
+				}
+			}
+			if (messages.length >= maxCount) break;
+		}
+		return messages;
+	} catch {
+		return [];
+	}
+}
+
 function getOtherLabel(options: AskOption[]): string {
 	return options.some((option) => option.label.toLowerCase() === "other") ? "Other (custom)" : "Other";
 }
@@ -236,17 +275,19 @@ async function askTextMode(
 			tui.requestRender();
 		}
 
-		if (timeoutSeconds > 0 && discordConfig.endpoint) {
-			timer = setTimeout(() => {
+		if (timeoutSeconds >= 0 && discordConfig.endpoint) {
+			const startDelegation = () => {
 				if (finished) return;
-				delegationStatus = "Délégation à Discord en cours via pi-bridge...";
+				delegationStatus = "Question déléguée à Discord via pi-bridge...";
 				refresh();
 
+				const recentMessages = extractRecentConversation(ctx.sessionManager, 6);
 				askDiscordQuestion(
 					{
 						question,
 						details,
 						context,
+						recentMessages,
 						timeoutSeconds: 300,
 					},
 					abortCtrl.signal,
@@ -276,7 +317,13 @@ async function askTextMode(
 							refresh();
 						}
 					});
-			}, timeoutSeconds * 1000);
+			};
+
+			if (timeoutSeconds === 0) {
+				startDelegation();
+			} else {
+				timer = setTimeout(startDelegation, timeoutSeconds * 1000);
+			}
 		}
 
 		function handleInput(data: string) {
@@ -393,11 +440,13 @@ async function askSingleChoice(
 				delegationStatus = "Question déléguée à Discord via pi-bridge...";
 				refresh();
 
+				const recentMessages = extractRecentConversation(ctx.sessionManager, 6);
 				askDiscordQuestion(
 					{
 						question,
 						details,
 						context,
+						recentMessages,
 						options,
 						multiSelect: false,
 						timeoutSeconds: 300,
@@ -648,11 +697,13 @@ async function askMultiChoice(
 				delegationStatus = "Question déléguée à Discord via pi-bridge...";
 				refresh();
 
+				const recentMessages = extractRecentConversation(ctx.sessionManager, 6);
 				askDiscordQuestion(
 					{
 						question,
 						details,
 						context,
+						recentMessages,
 						options,
 						multiSelect: true,
 						timeoutSeconds: 300,
