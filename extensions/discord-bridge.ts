@@ -24,6 +24,7 @@ export interface RecentTurnMessage {
 }
 
 export interface AskQuestionPayload {
+	id?: string;
 	question: string;
 	details?: string;
 	context?: string;
@@ -156,6 +157,7 @@ export async function askDiscordQuestion(
 			method: "POST",
 			headers,
 			body: JSON.stringify({
+				id: params.id,
 				question: params.question,
 				details: params.details,
 				context: params.context,
@@ -200,6 +202,41 @@ export async function askDiscordQuestion(
 			answers: [],
 			error: err.message || String(err),
 		};
+	}
+}
+
+export async function resolveDiscordQuestion(
+	questionId: string,
+	statusMessage?: string,
+	isCancelled = false,
+	config?: DiscordBridgeConfig,
+): Promise<boolean> {
+	const cfg = config || loadDiscordBridgeConfig();
+	if (!cfg.endpoint) return false;
+
+	const cleanBase = cfg.endpoint.replace(/\/+$/, "");
+	const url = `${cleanBase}/api/ask/${encodeURIComponent(questionId)}/resolve`;
+
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+	if (cfg.apiKey) {
+		headers.Authorization = `Bearer ${cfg.apiKey}`;
+	}
+
+	try {
+		const res = await fetch(url, {
+			method: "POST",
+			headers,
+			body: JSON.stringify({
+				statusMessage,
+				status: isCancelled ? "cancelled" : "answered",
+				isCancelled,
+			}),
+		});
+		return res.ok;
+	} catch {
+		return false;
 	}
 }
 

@@ -13,6 +13,7 @@ import {
 	type AnswerItem,
 	askDiscordQuestion,
 	loadDiscordBridgeConfig,
+	resolveDiscordQuestion,
 } from "./discord-bridge";
 
 interface AskOption {
@@ -250,6 +251,8 @@ async function askTextMode(
 		let finished = false;
 		let delegationStatus: string | undefined;
 		let timer: any = null;
+		const questionId = Math.random().toString(36).slice(2, 10);
+		let isDelegating = false;
 		const abortCtrl = new AbortController();
 		const editor = new Editor(tui, createEditorTheme(theme));
 
@@ -258,6 +261,13 @@ async function askTextMode(
 			finished = true;
 			if (timer) clearTimeout(timer);
 			abortCtrl.abort();
+			if (isDelegating) {
+				if (result.answers) {
+					resolveDiscordQuestion(questionId, "✅ Répondu directement depuis le terminal local", false, discordConfig).catch(() => {});
+				} else if (!result.retry) {
+					resolveDiscordQuestion(questionId, "❌ Question annulée depuis le terminal local", true, discordConfig).catch(() => {});
+				}
+			}
 			done(result);
 		}
 
@@ -278,12 +288,14 @@ async function askTextMode(
 		if (timeoutSeconds >= 0 && discordConfig.endpoint) {
 			const startDelegation = () => {
 				if (finished) return;
+				isDelegating = true;
 				delegationStatus = "Question déléguée à Discord via pi-bridge...";
 				refresh();
 
 				const recentMessages = extractRecentConversation(ctx.sessionManager, 6);
 				askDiscordQuestion(
 					{
+						id: questionId,
 						question,
 						details,
 						context,
@@ -412,6 +424,8 @@ async function askSingleChoice(
 		let finished = false;
 		let delegationStatus: string | undefined;
 		let timer: any = null;
+		const questionId = Math.random().toString(36).slice(2, 10);
+		let isDelegating = false;
 		const abortCtrl = new AbortController();
 		const editor = new Editor(tui, createEditorTheme(theme));
 
@@ -420,6 +434,13 @@ async function askSingleChoice(
 			finished = true;
 			if (timer) clearTimeout(timer);
 			abortCtrl.abort();
+			if (isDelegating) {
+				if (result.answers) {
+					resolveDiscordQuestion(questionId, "✅ Répondu directement depuis le terminal local", false, discordConfig).catch(() => {});
+				} else if (!result.retry) {
+					resolveDiscordQuestion(questionId, "❌ Question annulée depuis le terminal local", true, discordConfig).catch(() => {});
+				}
+			}
 			done(result);
 		}
 
@@ -437,12 +458,14 @@ async function askSingleChoice(
 		if (timeoutSeconds >= 0 && discordConfig.endpoint) {
 			const startDelegation = () => {
 				if (finished) return;
+				isDelegating = true;
 				delegationStatus = "Question déléguée à Discord via pi-bridge...";
 				refresh();
 
 				const recentMessages = extractRecentConversation(ctx.sessionManager, 6);
 				askDiscordQuestion(
 					{
+						id: questionId,
 						question,
 						details,
 						context,
@@ -666,6 +689,8 @@ async function askMultiChoice(
 		let finished = false;
 		let delegationStatus: string | undefined;
 		let timer: any = null;
+		const questionId = Math.random().toString(36).slice(2, 10);
+		let isDelegating = false;
 		const abortCtrl = new AbortController();
 		const selected = new Map<string, AskAnswer>();
 		const editor = new Editor(tui, createEditorTheme(theme));
@@ -675,6 +700,13 @@ async function askMultiChoice(
 			finished = true;
 			if (timer) clearTimeout(timer);
 			abortCtrl.abort();
+			if (isDelegating) {
+				if (result.answers) {
+					resolveDiscordQuestion(questionId, "✅ Répondu directement depuis le terminal local", false, discordConfig).catch(() => {});
+				} else if (!result.retry) {
+					resolveDiscordQuestion(questionId, "❌ Question annulée depuis le terminal local", true, discordConfig).catch(() => {});
+				}
+			}
 			done(result);
 		}
 
@@ -694,12 +726,14 @@ async function askMultiChoice(
 		if (timeoutSeconds >= 0 && discordConfig.endpoint) {
 			const startDelegation = () => {
 				if (finished) return;
+				isDelegating = true;
 				delegationStatus = "Question déléguée à Discord via pi-bridge...";
 				refresh();
 
 				const recentMessages = extractRecentConversation(ctx.sessionManager, 6);
 				askDiscordQuestion(
 					{
+						id: questionId,
 						question,
 						details,
 						context,
