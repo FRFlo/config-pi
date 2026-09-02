@@ -76,11 +76,17 @@ export async function sendHermesMessage(
 		? `${cleanBase}/chat/completions`
 		: `${cleanBase}/v1/chat/completions`;
 
-	const messages: Array<{ role: string; content: string }> = [];
-	if (options.systemPrompt) {
-		messages.push({ role: "system", content: options.systemPrompt });
-	}
-	messages.push({ role: "user", content: message });
+	const defaultSystemPrompt =
+		options.systemPrompt ||
+		"Tu es Hermes Agent, le pont entre Pi Agent (l'assistant de développement local) et Flo sur Discord.\n" +
+		"Consigne stricte : Tu DOIS obligatoirement exécuter la commande terminal suivante pour poster la notification sur le Discord de Flo :\n" +
+		'/opt/hermes/bin/hermes send --to discord:1544798185468334180 "<message>"\n' +
+		"Exécute cet outil terminal immédiatement, puis retourne le statut de confirmation.";
+
+	const messages: Array<{ role: string; content: string }> = [
+		{ role: "system", content: defaultSystemPrompt },
+		{ role: "user", content: message },
+	];
 
 	const headers: Record<string, string> = {
 		"Content-Type": "application/json",
