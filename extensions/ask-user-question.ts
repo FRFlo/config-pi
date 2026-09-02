@@ -9,6 +9,7 @@ import {
 	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { askHermesQuestion, loadHermesConfig } from "./hermes";
 
 interface AskOption {
 	label: string;
@@ -200,6 +201,124 @@ function buildResult(question: string, context: string | undefined, mode: AskUse
 	};
 }
 
+async function askTextMode(
+	ctx: any,
+	question: string,
+	context: string | undefined,
+): Promise<AskAnswer | null> {
+	const hermesConfig = loadHermesConfig();
+	const timeoutSeconds = hermesConfig.enabled !== false ? hermesConfig.timeoutSeconds || 45 : 0;
+
+	return ctx.ui.custom<AskAnswer | null>((tui: any, theme: any, _kb: any, done: (result: AskAnswer | null) => void) => {
+		let cachedLines: string[] | undefined;
+		let cachedWidth = -1;
+		let finished = false;
+		let delegationStatus: string | undefined;
+		let timer: any = null;
+		const abortCtrl = new AbortController();
+		const editor = new Editor(tui, createEditorTheme(theme));
+
+		function safeDone(result: AskAnswer | null) {
+			if (finished) return;
+			finished = true;
+			if (timer) clearTimeout(timer);
+			abortCtrl.abort();
+			done(result);
+		}
+
+		editor.onSubmit = (value) => {
+			const trimmed = value.trim();
+			if (!trimmed) {
+				safeDone(null);
+				return;
+			}
+			safeDone({ type: "text", label: trimmed, value: trimmed });
+		};
+
+		function refresh() {
+			cachedLines = undefined;
+			tui.requestRender();
+		}
+
+		if (timeoutSeconds > 0 && hermesConfig.baseUrl) {
+			timer = setTimeout(() => {
+				if (finished) return;
+				delegationStatus = "Délégation à Hermes en cours sur Discord...";
+				refresh();
+
+				askHermesQuestion({ question, details: context }, abortCtrl.signal, hermesConfig)
+					.then((res) => {
+						if (abortCtrl.signal.aborted || finished) return;
+						if (res.ok && res.rawAnswer) {
+							safeDone({ type: "text", label: res.rawAnswer, value: res.rawAnswer });
+						} else {
+							delegationStatus = `Erreur Hermes: ${res.error || "Pas de réponse"}`;
+							refresh();
+						}
+					})
+					.catch((err) => {
+						if (!abortCtrl.signal.aborted && !finished) {
+							delegationStatus = `Erreur Hermes: ${err.message || String(err)}`;
+							refresh();
+						}
+					});
+			}, timeoutSeconds * 1000);
+		}
+
+		function handleInput(data: string) {
+			if (matchesKey(data, Key.escape)) {
+				safeDone(null);
+				return;
+			}
+			editor.handleInput(data);
+			refresh();
+		}
+
+		function render(width: number): string[] {
+			if (cachedLines && cachedWidth === width) return cachedLines;
+
+			const lines: string[] = [];
+			const add = (text: string) => lines.push(truncateToWidth(text, width));
+
+			add(theme.fg("accent", "─".repeat(width)));
+			addWrapped(lines, theme.fg("text", ` ${question}`), width);
+			if (context) {
+				lines.push("");
+				addWrapped(lines, theme.fg("muted", ` ${context}`), width);
+			}
+			lines.push("");
+
+			if (delegationStatus) {
+				add(theme.fg("warning", ` 🤖 [Hermes] ${delegationStatus}`));
+				lines.push("");
+			} else if (timeoutSeconds > 0) {
+				add(theme.fg("dim", ` (Délégation Hermes/Discord si inactif pendant ${timeoutSeconds}s)`));
+				lines.push("");
+			}
+
+			add(theme.fg("muted", " Saisissez votre réponse :"));
+			for (const line of editor.render(Math.max(1, width - 2))) {
+				add(` ${line}`);
+			}
+			lines.push("");
+			add(theme.fg("dim", " Entrée pour valider • Échap pour annuler"));
+			add(theme.fg("accent", "─".repeat(width)));
+
+			cachedLines = lines;
+			cachedWidth = width;
+			return lines;
+		}
+
+		return {
+			render,
+			invalidate: () => {
+				cachedLines = undefined;
+			},
+			handleInput,
+		};
+	});
+}
+
 async function askSingleChoice(
 	ctx: any,
 	question: string,
@@ -212,22 +331,76 @@ async function askSingleChoice(
 		{ id: "other", label: otherLabel, value: "__other__", isOther: true },
 	];
 
+	const hermesConfig = loadHermesConfig();
+	const timeoutSeconds = hermesConfig.enabled !== false ? hermesConfig.timeoutSeconds || 45 : 0;
+
 	return ctx.ui.custom<AskAnswer | null>((tui: any, theme: any, _kb: any, done: (result: AskAnswer | null) => void) => {
 		let optionIndex = 0;
 		let editMode = false;
 		let cachedLines: string[] | undefined;
 		let cachedWidth = -1;
+		let finished = false;
+		let delegationStatus: string | undefined;
+		let timer: any = null;
+		const abortCtrl = new AbortController();
 		const editor = new Editor(tui, createEditorTheme(theme));
+
+		function safeDone(result: AskAnswer | null) {
+			if (finished) return;
+			finished = true;
+			if (timer) clearTimeout(timer);
+			abortCtrl.abort();
+			done(result);
+		}
 
 		editor.onSubmit = (value) => {
 			const trimmed = value.trim();
 			if (!trimmed) return;
-			done({ type: "other", label: trimmed, value: trimmed });
+			safeDone({ type: "other", label: trimmed, value: trimmed });
 		};
 
 		function refresh() {
 			cachedLines = undefined;
 			tui.requestRender();
+		}
+
+		if (timeoutSeconds > 0 && hermesConfig.baseUrl) {
+			timer = setTimeout(() => {
+				if (finished) return;
+				delegationStatus = "Question déléguée à Hermes sur Discord...";
+				refresh();
+
+				askHermesQuestion({ question, details: context, options }, abortCtrl.signal, hermesConfig)
+					.then((res) => {
+						if (abortCtrl.signal.aborted || finished) return;
+						if (res.ok) {
+							if (res.matchedOptionIndex !== undefined) {
+								const opt = options[res.matchedOptionIndex];
+								safeDone({
+									type: "option",
+									label: opt.label,
+									value: opt.value,
+									index: res.matchedOptionIndex + 1,
+								});
+							} else if (res.rawAnswer) {
+								safeDone({
+									type: "other",
+									label: res.rawAnswer,
+									value: res.rawAnswer,
+								});
+							}
+						} else {
+							delegationStatus = `Erreur Hermes: ${res.error || "Pas de réponse"}`;
+							refresh();
+						}
+					})
+					.catch((err) => {
+						if (!abortCtrl.signal.aborted && !finished) {
+							delegationStatus = `Erreur Hermes: ${err.message || String(err)}`;
+							refresh();
+						}
+					});
+			}, timeoutSeconds * 1000);
 		}
 
 		function handleInput(data: string) {
@@ -261,7 +434,7 @@ async function askSingleChoice(
 					refresh();
 					return;
 				}
-				done({
+				safeDone({
 					type: "option",
 					label: selected.label,
 					value: selected.value,
@@ -270,15 +443,11 @@ async function askSingleChoice(
 				return;
 			}
 			if (matchesKey(data, Key.escape)) {
-				done(null);
+				safeDone(null);
 			}
 		}
 
 		function render(width: number): string[] {
-			// The cache MUST be keyed on width: pi-tui calls requestRender() but NOT
-			// invalidate() on terminal resize, so render() can be re-entered with a
-			// new width. Returning stale wider lines trips the TUI width guard and
-			// crashes the process.
 			if (cachedLines && cachedWidth === width) return cachedLines;
 
 			const lines: string[] = [];
@@ -291,6 +460,14 @@ async function askSingleChoice(
 				addWrapped(lines, theme.fg("muted", ` ${context}`), width);
 			}
 			lines.push("");
+
+			if (delegationStatus) {
+				add(theme.fg("warning", ` 🤖 [Hermes] ${delegationStatus}`));
+				lines.push("");
+			} else if (timeoutSeconds > 0) {
+				add(theme.fg("dim", ` (Délégation Hermes/Discord si inactif pendant ${timeoutSeconds}s)`));
+				lines.push("");
+			}
 
 			for (let i = 0; i < allOptions.length; i++) {
 				const option = allOptions[i];
@@ -311,7 +488,7 @@ async function askSingleChoice(
 					add(` ${line}`);
 				}
 				lines.push("");
-				add(theme.fg("dim", " Enter to submit • Esc to go back"));
+				add(theme.fg("dim", " Enter to save • Esc to go back"));
 			} else {
 				lines.push("");
 				add(theme.fg("dim", " ↑↓ navigate • Enter select • Esc cancel"));
@@ -345,20 +522,40 @@ async function askMultiChoice(
 		id: `option:${index}`,
 		index: index + 1,
 	}));
-	const submitItem: DisplayOption = { id: "submit", label: "Submit", value: "__submit__", isSubmit: true };
+	const submitItem: DisplayOption = {
+		id: "submit",
+		label: "Submit selection",
+		value: "__submit__",
+		isSubmit: true,
+	};
 	const allItems: DisplayOption[] = [
 		...choiceItems,
 		{ id: "other", label: otherLabel, value: "__other__", isOther: true },
 		submitItem,
 	];
 
+	const hermesConfig = loadHermesConfig();
+	const timeoutSeconds = hermesConfig.enabled !== false ? hermesConfig.timeoutSeconds || 45 : 0;
+
 	return ctx.ui.custom<AskAnswer[] | null>((tui: any, theme: any, _kb: any, done: (result: AskAnswer[] | null) => void) => {
 		let optionIndex = 0;
 		let editMode = false;
 		let cachedLines: string[] | undefined;
 		let cachedWidth = -1;
+		let finished = false;
+		let delegationStatus: string | undefined;
+		let timer: any = null;
+		const abortCtrl = new AbortController();
 		const selected = new Map<string, AskAnswer>();
 		const editor = new Editor(tui, createEditorTheme(theme));
+
+		function safeDone(result: AskAnswer[] | null) {
+			if (finished) return;
+			finished = true;
+			if (timer) clearTimeout(timer);
+			abortCtrl.abort();
+			done(result);
+		}
 
 		editor.onSubmit = (value) => {
 			const trimmed = value.trim();
@@ -371,6 +568,53 @@ async function askMultiChoice(
 		function refresh() {
 			cachedLines = undefined;
 			tui.requestRender();
+		}
+
+		if (timeoutSeconds > 0 && hermesConfig.baseUrl) {
+			timer = setTimeout(() => {
+				if (finished) return;
+				delegationStatus = "Question déléguée à Hermes sur Discord...";
+				refresh();
+
+				askHermesQuestion(
+					{ question, details: context, options, multiSelect: true },
+					abortCtrl.signal,
+					hermesConfig,
+				)
+					.then((res) => {
+						if (abortCtrl.signal.aborted || finished) return;
+						if (res.ok) {
+							if (res.matchedOptionIndex !== undefined) {
+								const opt = options[res.matchedOptionIndex];
+								safeDone([
+									{
+										type: "option",
+										label: opt.label,
+										value: opt.value,
+										index: res.matchedOptionIndex + 1,
+									},
+								]);
+							} else if (res.rawAnswer) {
+								safeDone([
+									{
+										type: "other",
+										label: res.rawAnswer,
+										value: res.rawAnswer,
+									},
+								]);
+							}
+						} else {
+							delegationStatus = `Erreur Hermes: ${res.error || "Pas de réponse"}`;
+							refresh();
+						}
+					})
+					.catch((err) => {
+						if (!abortCtrl.signal.aborted && !finished) {
+							delegationStatus = `Erreur Hermes: ${err.message || String(err)}`;
+							refresh();
+						}
+					});
+			}, timeoutSeconds * 1000);
 		}
 
 		function toggleOption(item: DisplayOption) {
@@ -432,7 +676,7 @@ async function askMultiChoice(
 			if (matchesKey(data, Key.enter)) {
 				if (current.isSubmit) {
 					if (selected.size > 0) {
-						done(sortAnswers(Array.from(selected.values())));
+						safeDone(sortAnswers(Array.from(selected.values())));
 					}
 					return;
 				}
@@ -447,15 +691,11 @@ async function askMultiChoice(
 			}
 
 			if (matchesKey(data, Key.escape)) {
-				done(null);
+				safeDone(null);
 			}
 		}
 
 		function render(width: number): string[] {
-			// The cache MUST be keyed on width: pi-tui calls requestRender() but NOT
-			// invalidate() on terminal resize, so render() can be re-entered with a
-			// new width. Returning stale wider lines trips the TUI width guard and
-			// crashes the process.
 			if (cachedLines && cachedWidth === width) return cachedLines;
 
 			const lines: string[] = [];
@@ -469,37 +709,39 @@ async function askMultiChoice(
 			}
 			lines.push("");
 
+			if (delegationStatus) {
+				add(theme.fg("warning", ` 🤖 [Hermes] ${delegationStatus}`));
+				lines.push("");
+			} else if (timeoutSeconds > 0) {
+				add(theme.fg("dim", ` (Délégation Hermes/Discord si inactif pendant ${timeoutSeconds}s)`));
+				lines.push("");
+			}
+
 			for (let i = 0; i < allItems.length; i++) {
 				const item = allItems[i];
 				const isFocused = i === optionIndex;
-				const prefix = isFocused ? theme.fg("accent", "> ") : "  ";
 
 				if (item.isSubmit) {
-					const label = selected.size > 0 ? `✓ ${item.label} (${selected.size} selected)` : `○ ${item.label}`;
-					const styled = isFocused
-						? theme.fg("accent", label)
-						: theme.fg(selected.size > 0 ? "success" : "dim", label);
+					lines.push("");
+					const prefix = isFocused ? theme.fg("accent", "> ") : "  ";
+					const styled = isFocused ? theme.bold(theme.fg("accent", `[ ${item.label} ]`)) : theme.fg("dim", `[ ${item.label} ]`);
 					add(`${prefix}${styled}`);
 					continue;
 				}
 
-				if (item.isOther) {
-					const other = selected.get("other");
-					const marker = other ? "[x]" : "[ ]";
-					const suffix = other ? ` — ${other.label}` : "";
-					const styled = isFocused
-						? theme.fg("accent", `${marker} ${item.label}${suffix}`)
-						: theme.fg(other ? "success" : "text", `${marker} ${item.label}${suffix}`);
-					add(`${prefix}${styled}`);
-					continue;
-				}
-
-				const checked = selected.has(item.id);
-				const marker = checked ? "[x]" : "[ ]";
-				const label = `${marker} ${item.index}. ${item.label}`;
+				const isOther = Boolean(item.isOther);
+				const otherAnswer = selected.get("other");
+				const checked = isOther ? Boolean(otherAnswer) : selected.has(item.id);
+				const checkbox = checked ? "[x] " : "[ ] ";
+				const prefix = isFocused ? theme.fg("accent", "> ") : "  ";
+				const label = isOther
+					? otherAnswer
+						? `Other: ${otherAnswer.label}`
+						: item.label
+					: `${item.index}. ${item.label}`;
 				const styled = isFocused
-					? theme.fg("accent", label)
-					: theme.fg(checked ? "success" : "text", label);
+					? theme.fg("accent", `${checkbox}${label}`)
+					: theme.fg(checked ? "success" : "text", `${checkbox}${label}`);
 				add(`${prefix}${styled}`);
 				if (item.description) {
 					addWrapped(lines, theme.fg("muted", item.description), width, "     ");
@@ -538,11 +780,6 @@ async function askMultiChoice(
 	});
 }
 
-// Shared UI mutex. ctx.ui.custom()/editor can only handle one active call at
-// a time, so ALL pop-up-style tools (ask_user_question, quiz, ...) must
-// serialize against each other, not just against themselves. We stash one
-// mutex on globalThis so separate extension files can share it without
-// importing each other.
 const SHARED_UI_LOCK_KEY = "__piSharedUiLock";
 function getSharedUiLock() {
 	const g = globalThis as any;
@@ -599,14 +836,11 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 
 			return withUILock(async () => {
 				if (mode === "text") {
-					const editorTitle = context ? `${params.question}\n\n${context}` : params.question;
-					const answer = await ctx.ui.editor(editorTitle);
-					if (answer === undefined) {
+					const answer = await askTextMode(ctx, params.question, context);
+					if (answer === null) {
 						return cancelledResult(params.question, mode, context);
 					}
-					return buildResult(params.question, context, mode, [
-						{ type: "text", label: answer.trim(), value: answer.trim() },
-					]);
+					return buildResult(params.question, context, mode, [answer]);
 				}
 
 				if (mode === "single-select") {

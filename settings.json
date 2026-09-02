@@ -26,5 +26,12 @@
       }
     }
   },
+  "hermes": {
+    "enabled": true,
+    "baseUrl": "https://your-hermes-url.example.com/v1",
+    "apiKey": "",
+    "timeoutSeconds": 45,
+    "model": "hermes-agent"
+  },
   "hideThinkingBlock": false
 }
