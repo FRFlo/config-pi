@@ -10,7 +10,6 @@ export interface DiscordBridgeConfig {
 	apiKey?: string;
 	timeoutSeconds?: number;
 	channelId?: string;
-	threadId?: string;
 }
 
 export interface OptionItem {
@@ -55,7 +54,7 @@ export function loadDiscordBridgeConfig(): DiscordBridgeConfig {
 		endpoint: process.env.PI_BRIDGE_ENDPOINT || "https://your-bridge-url.example.com",
 		apiKey: process.env.PI_BRIDGE_API_KEY || "",
 		timeoutSeconds: 45,
-		threadId: "your-discord-channel-id",
+		channelId: "your-discord-channel-id",
 	};
 
 	try {
@@ -105,7 +104,6 @@ export async function sendDiscordMessage(
 				message,
 				title: options.title,
 				channelId: config.channelId,
-				threadId: config.threadId,
 			}),
 			signal: options.signal,
 		});
@@ -166,7 +164,6 @@ export async function askDiscordQuestion(
 				multiSelect: params.multiSelect,
 				timeoutSeconds: params.timeoutSeconds || 300,
 				channelId: cfg.channelId,
-				threadId: cfg.threadId,
 			}),
 			signal,
 		});
