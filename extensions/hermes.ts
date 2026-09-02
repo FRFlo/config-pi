@@ -8,6 +8,7 @@ import { Type } from "typebox";
 export interface HermesConfig {
 	enabled?: boolean;
 	baseUrl?: string;
+	endpoint?: string;
 	apiKey?: string;
 	sessionId?: string;
 	timeoutSeconds?: number;
@@ -17,7 +18,8 @@ export interface HermesConfig {
 export function loadHermesConfig(): HermesConfig {
 	const config: HermesConfig = {
 		enabled: true,
-		baseUrl: process.env.HERMES_BASE_URL || "https://your-hermes-url.example.com/v1",
+		endpoint: process.env.HERMES_ENDPOINT || process.env.HERMES_BASE_URL || "https://your-hermes-url.example.com",
+		baseUrl: process.env.HERMES_BASE_URL || process.env.HERMES_ENDPOINT || "https://your-hermes-url.example.com",
 		apiKey: process.env.HERMES_API_KEY || "",
 		timeoutSeconds: 45,
 		model: "hermes-agent",
@@ -34,6 +36,10 @@ export function loadHermesConfig(): HermesConfig {
 		}
 	} catch (_err) {
 		// Ignore parse errors, use defaults/env
+	}
+
+	if (config.endpoint && !config.baseUrl) {
+		config.baseUrl = config.endpoint;
 	}
 
 	return config;
@@ -59,12 +65,16 @@ export async function sendHermesMessage(
 	} = {},
 ): Promise<{ ok: boolean; response?: string; error?: string }> {
 	const config = options.config || loadHermesConfig();
-	if (!config.baseUrl) {
-		return { ok: false, error: "Hermes baseUrl is not configured" };
+	const rawBase = config.endpoint || config.baseUrl;
+	if (!rawBase) {
+		return { ok: false, error: "Hermes endpoint/baseUrl is not configured" };
 	}
 
 	const sessionId = getHermesSessionId(config);
-	const url = config.baseUrl.replace(/\/+$/, "") + "/chat/completions";
+	const cleanBase = rawBase.replace(/\/+$/, "");
+	const url = cleanBase.endsWith("/v1")
+		? `${cleanBase}/chat/completions`
+		: `${cleanBase}/v1/chat/completions`;
 
 	const messages: Array<{ role: string; content: string }> = [];
 	if (options.systemPrompt) {

@@ -28,7 +28,7 @@
   },
   "hermes": {
     "enabled": true,
-    "baseUrl": "https://your-hermes-url.example.com/v1",
+    "endpoint": "https://your-hermes-url.example.com",
     "apiKey": "",
     "timeoutSeconds": 45,
     "model": "hermes-agent"
