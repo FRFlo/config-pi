@@ -29,7 +29,7 @@
   "hermes": {
     "enabled": true,
     "endpoint": "https://your-hermes-url.example.com",
-    "apiKey": "",
+    "apiKey": "your-bridge-api-key",
     "timeoutSeconds": 45,
     "model": "hermes-agent"
   },
