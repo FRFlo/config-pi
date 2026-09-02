@@ -355,7 +355,7 @@ async function askSingleChoice(
 	];
 
 	const discordConfig = loadDiscordBridgeConfig();
-	const timeoutSeconds = discordConfig.enabled !== false ? discordConfig.timeoutSeconds || 45 : 0;
+	const timeoutSeconds = discordConfig.enabled !== false ? (typeof discordConfig.timeoutSeconds === "number" ? discordConfig.timeoutSeconds : 45) : -1;
 
 	return ctx.ui.custom<{ answers: AskAnswer[] | null; retry?: boolean }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null; retry?: boolean }) => void) => {
 		let optionIndex = 0;
@@ -387,8 +387,8 @@ async function askSingleChoice(
 			tui.requestRender();
 		}
 
-		if (timeoutSeconds > 0 && discordConfig.endpoint) {
-			timer = setTimeout(() => {
+		if (timeoutSeconds >= 0 && discordConfig.endpoint) {
+			const startDelegation = () => {
 				if (finished) return;
 				delegationStatus = "Question déléguée à Discord via pi-bridge...";
 				refresh();
@@ -447,7 +447,13 @@ async function askSingleChoice(
 							refresh();
 						}
 					});
-			}, timeoutSeconds * 1000);
+			};
+
+			if (timeoutSeconds === 0) {
+				startDelegation();
+			} else {
+				timer = setTimeout(startDelegation, timeoutSeconds * 1000);
+			}
 		}
 
 		function handleInput(data: string) {
@@ -601,7 +607,7 @@ async function askMultiChoice(
 	];
 
 	const discordConfig = loadDiscordBridgeConfig();
-	const timeoutSeconds = discordConfig.enabled !== false ? discordConfig.timeoutSeconds || 45 : 0;
+	const timeoutSeconds = discordConfig.enabled !== false ? (typeof discordConfig.timeoutSeconds === "number" ? discordConfig.timeoutSeconds : 45) : -1;
 
 	return ctx.ui.custom<{ answers: AskAnswer[] | null; retry?: boolean }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null; retry?: boolean }) => void) => {
 		let optionIndex = 0;
@@ -636,8 +642,8 @@ async function askMultiChoice(
 			tui.requestRender();
 		}
 
-		if (timeoutSeconds > 0 && discordConfig.endpoint) {
-			timer = setTimeout(() => {
+		if (timeoutSeconds >= 0 && discordConfig.endpoint) {
+			const startDelegation = () => {
 				if (finished) return;
 				delegationStatus = "Question déléguée à Discord via pi-bridge...";
 				refresh();
@@ -689,7 +695,13 @@ async function askMultiChoice(
 							refresh();
 						}
 					});
-			}, timeoutSeconds * 1000);
+			};
+
+			if (timeoutSeconds === 0) {
+				startDelegation();
+			} else {
+				timer = setTimeout(startDelegation, timeoutSeconds * 1000);
+			}
 		}
 
 		function toggleOption(item: DisplayOption) {

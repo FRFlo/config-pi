@@ -30,7 +30,7 @@
     "enabled": true,
     "endpoint": "https://your-bridge-url.example.com",
     "apiKey": "your-bridge-api-key",
-    "timeoutSeconds": 45,
+    "timeoutSeconds": 0,
     "channelId": "your-discord-channel-id"
   },
   "hideThinkingBlock": false
