@@ -260,13 +260,22 @@ async function askTextMode(
 			if (finished) return;
 			finished = true;
 			if (timer) clearTimeout(timer);
-			abortCtrl.abort();
 			if (isDelegating) {
 				if (result.answers) {
-					resolveDiscordQuestion(questionId, "✅ Répondu directement depuis le terminal local", false, discordConfig).catch(() => {});
+					const answerText = formatAnswersForContent(result.answers);
+					const msg = `✅ **Répondu depuis le terminal :**\n${answerText}`;
+					resolveDiscordQuestion(questionId, msg, false, discordConfig).finally(() => {
+						abortCtrl.abort();
+					});
 				} else if (!result.retry) {
-					resolveDiscordQuestion(questionId, "❌ Question annulée depuis le terminal local", true, discordConfig).catch(() => {});
+					resolveDiscordQuestion(questionId, "❌ Question annulée depuis le terminal", true, discordConfig).finally(() => {
+						abortCtrl.abort();
+					});
+				} else {
+					abortCtrl.abort();
 				}
+			} else {
+				abortCtrl.abort();
 			}
 			done(result);
 		}
@@ -433,13 +442,22 @@ async function askSingleChoice(
 			if (finished) return;
 			finished = true;
 			if (timer) clearTimeout(timer);
-			abortCtrl.abort();
 			if (isDelegating) {
 				if (result.answers) {
-					resolveDiscordQuestion(questionId, "✅ Répondu directement depuis le terminal local", false, discordConfig).catch(() => {});
+					const answerText = formatAnswersForContent(result.answers);
+					const msg = `✅ **Répondu depuis le terminal :**\n${answerText}`;
+					resolveDiscordQuestion(questionId, msg, false, discordConfig).finally(() => {
+						abortCtrl.abort();
+					});
 				} else if (!result.retry) {
-					resolveDiscordQuestion(questionId, "❌ Question annulée depuis le terminal local", true, discordConfig).catch(() => {});
+					resolveDiscordQuestion(questionId, "❌ Question annulée depuis le terminal", true, discordConfig).finally(() => {
+						abortCtrl.abort();
+					});
+				} else {
+					abortCtrl.abort();
 				}
+			} else {
+				abortCtrl.abort();
 			}
 			done(result);
 		}
@@ -699,13 +717,22 @@ async function askMultiChoice(
 			if (finished) return;
 			finished = true;
 			if (timer) clearTimeout(timer);
-			abortCtrl.abort();
 			if (isDelegating) {
 				if (result.answers) {
-					resolveDiscordQuestion(questionId, "✅ Répondu directement depuis le terminal local", false, discordConfig).catch(() => {});
+					const answerText = formatAnswersForContent(result.answers);
+					const msg = `✅ **Répondu depuis le terminal :**\n${answerText}`;
+					resolveDiscordQuestion(questionId, msg, false, discordConfig).finally(() => {
+						abortCtrl.abort();
+					});
 				} else if (!result.retry) {
-					resolveDiscordQuestion(questionId, "❌ Question annulée depuis le terminal local", true, discordConfig).catch(() => {});
+					resolveDiscordQuestion(questionId, "❌ Question annulée depuis le terminal", true, discordConfig).finally(() => {
+						abortCtrl.abort();
+					});
+				} else {
+					abortCtrl.abort();
 				}
+			} else {
+				abortCtrl.abort();
 			}
 			done(result);
 		}
