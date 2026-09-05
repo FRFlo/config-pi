@@ -1,6 +1,9 @@
 {
   "name": "pi-extensions",
   "private": true,
+  "scripts": {
+    "postinstall": "node ../scripts/patch-pi-tui.js"
+  },
   "dependencies": {
     "@xterm/headless": "^6.0.0",
     "pi-antigravity": "^0.7.2",
