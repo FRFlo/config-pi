@@ -178,6 +178,7 @@ export default function (pi: ExtensionAPI) {
 
   let userTookOver = false;
   let agentStarted = false;
+  let subagentSteerCount = 0;
   // Set when ask_question is called; suppresses auto-exit so the session stays
   // open while it waits for the orchestrator's reply. Cleared when the reply
   // lands — on `input` (covers a reply steered into the current run) and on
@@ -217,6 +218,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("agent_start", () => {
     agentStarted = true;
+    subagentSteerCount = 0;
     // A new turn is starting — any pending ask_question has now been answered
     // (or superseded), so let auto-exit resume normally when this turn ends.
     awaitingAnswer = false;
@@ -282,6 +284,70 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("turn_end", (event) => {
     recorder.turnEnd((event as any).turnIndex);
+
+    const message = (event as any).message;
+    if (!message || message.role !== "assistant") return;
+    if (awaitingAnswer) return;
+
+    // Check if ask_question was called
+    const hasAskQuestion =
+      (Array.isArray(message.content) &&
+        message.content.some((p: any) => p?.type === "toolCall" && p?.name === "ask_question")) ||
+      (event as any).toolResults?.some((t: any) => t?.toolName === "ask_question");
+
+    if (hasAskQuestion) {
+      subagentSteerCount = 0;
+      return;
+    }
+
+    const hasOtherToolCalls =
+      (Array.isArray(message.content) &&
+        message.content.some((p: any) => p?.type === "toolCall")) ||
+      ((event as any).toolResults && (event as any).toolResults.length > 0);
+
+    if (hasOtherToolCalls) return;
+
+    let rawText = "";
+    if (typeof message.content === "string") {
+      rawText = message.content;
+    } else if (Array.isArray(message.content)) {
+      rawText = message.content
+        .filter((p: any) => p?.type === "text" && typeof p?.text === "string")
+        .map((p: any) => p.text)
+        .join("\n");
+    }
+
+    const textWithoutCode = rawText
+      .replace(/```[\s\S]*?```/g, "")
+      .replace(/`[^`\n]*`/g, "")
+      .trim();
+
+    if (!textWithoutCode) return;
+
+    const endsWithQuestion = /\?\s*(\*\*|\*|__|_|\)|\]|\})*\s*$/i.test(textWithoutCode);
+    const paragraphs = textWithoutCode.split(/\n\s*\n/).filter(Boolean);
+    const lastParagraph = paragraphs[paragraphs.length - 1] || textWithoutCode;
+    const containsClosingQuestion =
+      /\?\s*(\*\*|\*|__|_|\)|\]|\})*\s*$/i.test(lastParagraph) ||
+      /(?:do you want|would you like|should I|shall I|which (?:one|option|approach) do you prefer|what do you think|how would you like to proceed|please let me know if you (?:want|prefer)|let me know what you prefer)\b[^\n]*\?/i.test(lastParagraph) ||
+      /(?:souhaitez-vous|voulez-vous|préférez-vous|dois-je|faut-il|qu'en pensez-vous|dites-moi si vous)\b[^\n]*\?/i.test(lastParagraph);
+
+    if (endsWithQuestion || containsClosingQuestion) {
+      if (subagentSteerCount >= 2) return;
+      subagentSteerCount++;
+
+      pi.sendMessage(
+        {
+          customType: "question-guardrail",
+          content:
+            "CRITICAL PROTOCOL VIOLATION: You asked a question in plain text instead of calling the `ask_question` tool. You are STRICTLY FORBIDDEN from asking questions in text. Call the `ask_question` tool now so the orchestrator can reply.",
+          display: false,
+        },
+        { deliverAs: "steer", triggerTurn: true },
+      );
+    } else {
+      subagentSteerCount = 0;
+    }
   });
 
   pi.on("before_provider_request", () => {
@@ -339,14 +405,14 @@ export default function (pi: ExtensionAPI) {
       "Your session stays open while you wait — the answer arrives as your next message, then you continue. " +
       "Ask exactly one question per call; make separate calls for unrelated questions.",
     promptSnippet:
-      "Use this tool to ask the orchestrator one clarifying, missing-requirement, preference, or decision question before continuing — instead of guessing.",
+      "Ask the orchestrator one clarifying, missing-requirement, preference, or decision question instead of guessing. Pauses execution until answered.",
     promptGuidelines: [
-      "Ask exactly one question per tool call.",
-      "If you need answers to multiple things, make separate ask_question calls instead of bundling them.",
-      "Prefer this tool over guessing when requirements, preferences, or implementation choices are unclear.",
-      "Use it when multiple valid paths exist and the right one depends on the orchestrator's intent.",
-      "Give enough context in the question that the orchestrator can answer without re-reading your whole task.",
-      "After asking, stop and wait — the reply will arrive as your next message.",
+      "CRITICAL: NEVER ask questions, clarifications, or decisions directly in plain chat text.",
+      "Whenever you hit ambiguous requirements, need clarification, or need a decision from the orchestrator, you MUST invoke the `ask_question` tool.",
+      "Do not end your message with a question in text. Any question must be submitted via `ask_question` so the orchestrator can respond.",
+      "Ask exactly one question per tool call. If you need answers to multiple things, make separate ask_question calls.",
+      "Give enough context in the question so the orchestrator can answer without re-reading your whole task.",
+      "After calling `ask_question`, stop and wait — the reply will arrive as your next message.",
     ],
     parameters: Type.Object({
       question: Type.String({

@@ -1010,17 +1010,18 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 		name: "ask_user_question",
 		label: "ask_user_question",
 		description:
-			"Ask the user a single question and pause execution until they answer. Use this when requirements are ambiguous, user preferences are needed, a decision would materially affect implementation, or you need confirmation before proceeding. Ask exactly one question per tool call, and prefer multiple separate tool calls over bundling unrelated questions together.",
+			"Prompt the user with an interactive question, choice selection, or confirmation dialog, and pause execution until they respond. Use this tool WHENEVER you need clarification, user preferences, confirmation, or any decision that affects implementation. DO NOT ask questions in chat text; always invoke this tool instead. Ask exactly one question per tool call, and prefer multiple separate tool calls over bundling unrelated questions together.",
 		promptSnippet:
-			"Use this tool to ask exactly one clarifying question, missing-requirement question, preference question, or decision question before continuing.",
+			"Prompt the user with interactive questions, options, or confirmations. Pauses execution until answered.",
 		promptGuidelines: [
-			"Ask exactly one question per tool call.",
-			"If you need answers to multiple questions, make multiple separate ask_user_question tool calls instead of combining them into one prompt.",
-			'Users will always be able to select "Other" to provide custom text input when options are provided.',
-			"Use multiSelect: true only when you need multiple answers to the same question.",
-			'If you recommend a specific option, make it the first option in the list and add "(Recommended)" at the end of the label.',
-			"Prefer this tool over guessing when requirements, preferences, or implementation choices are unclear.",
-			"Use this tool when multiple valid implementation paths exist and the preferred path depends on user choice.",
+			"CRITICAL: NEVER ask questions, choices, or confirmations directly in the chat or text output.",
+			"Whenever you need user input, clarification, confirmation, or a decision, you MUST invoke the `ask_user_question` tool.",
+			"Do not end your message with a question in chat text. If you have any question or need user validation, call `ask_user_question` instead of finishing your turn in text.",
+			"When calling `ask_user_question`, ask exactly one question per tool call. If multiple questions are needed, make multiple separate tool calls.",
+			"When multiple choices are possible in `ask_user_question`, provide them in the `options` array. If you recommend a specific option, place it first and append \"(Recommended)\" to the label.",
+			"Users will always be able to select \"Other\" and type custom text when options are provided in `ask_user_question`.",
+			"Use multiSelect: true in `ask_user_question` only when multiple answers can be selected simultaneously.",
+			"Prefer calling `ask_user_question` over guessing when requirements, user preferences, or implementation paths are ambiguous.",
 		],
 		parameters: AskUserQuestionParams,
 
@@ -1107,5 +1108,92 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 			const answerSummary = formatAnswersForContent(details.answers);
 			return new Text(theme.fg("success", "✓ ") + theme.fg("text", answerSummary), 0, 0);
 		},
+	});
+
+	let consecutiveSteers = 0;
+
+	pi.on("agent_start", () => {
+		consecutiveSteers = 0;
+	});
+
+	pi.on("turn_end", async (event, ctx) => {
+		const message = event.message;
+		if (!message || message.role !== "assistant") return;
+
+		// Check if interactive UI is present and tool is active
+		if (!ctx.hasUI) return;
+		const activeTools = pi.getActiveTools();
+		if (!activeTools.includes("ask_user_question")) return;
+
+		// Check if ask_user_question was already called in this turn
+		const hasQuestionInToolResults = event.toolResults?.some(
+			(tr: any) => tr?.toolName === "ask_user_question",
+		);
+		const hasQuestionToolCall =
+			Array.isArray(message.content) &&
+			message.content.some((part: any) => part?.type === "toolCall" && part?.name === "ask_user_question");
+
+		if (hasQuestionInToolResults || hasQuestionToolCall) {
+			consecutiveSteers = 0;
+			return;
+		}
+
+		// If other tools were executed in this turn, the agent is still running tools
+		const hasOtherToolCalls =
+			(Array.isArray(message.content) &&
+				message.content.some((part: any) => part?.type === "toolCall")) ||
+			(event.toolResults && event.toolResults.length > 0);
+
+		if (hasOtherToolCalls) {
+			return;
+		}
+
+		// Extract assistant text
+		let rawText = "";
+		if (typeof message.content === "string") {
+			rawText = message.content;
+		} else if (Array.isArray(message.content)) {
+			rawText = message.content
+				.filter((part: any) => part?.type === "text" && typeof part?.text === "string")
+				.map((part: any) => part.text)
+				.join("\n");
+		}
+
+		// Strip markdown code blocks and inline code
+		const textWithoutCode = rawText
+			.replace(/```[\s\S]*?```/g, "")
+			.replace(/`[^`\n]*`/g, "")
+			.trim();
+
+		if (!textWithoutCode) return;
+
+		// Detect if the message ends with a question or has a closing question directed to user
+		const endsWithQuestion = /\?\s*(\*\*|\*|__|_|\)|\]|\})*\s*$/i.test(textWithoutCode);
+
+		const paragraphs = textWithoutCode.split(/\n\s*\n/).filter(Boolean);
+		const lastParagraph = paragraphs[paragraphs.length - 1] || textWithoutCode;
+		const containsClosingQuestion =
+			/\?\s*(\*\*|\*|__|_|\)|\]|\})*\s*$/i.test(lastParagraph) ||
+			/(?:do you want|would you like|should I|shall I|which (?:one|option|approach) do you prefer|what do you think|how would you like to proceed|please let me know if you (?:want|prefer)|let me know what you prefer)\b[^\n]*\?/i.test(lastParagraph) ||
+			/(?:souhaitez-vous|voulez-vous|préférez-vous|dois-je|faut-il|qu'en pensez-vous|dites-moi si vous)\b[^\n]*\?/i.test(lastParagraph);
+
+		if (endsWithQuestion || containsClosingQuestion) {
+			if (consecutiveSteers >= 2) {
+				return;
+			}
+			consecutiveSteers++;
+
+			pi.sendMessage(
+				{
+					customType: "question-guardrail",
+					content:
+						"CRITICAL PROTOCOL VIOLATION: You ended your response with a question or requested user confirmation/input in plain chat text instead of calling the `ask_user_question` tool. You are STRICTLY FORBIDDEN from asking questions in plain text. Call the `ask_user_question` tool now to prompt the user.",
+					display: false,
+				},
+				{ deliverAs: "steer", triggerTurn: true },
+			);
+		} else {
+			consecutiveSteers = 0;
+		}
 	});
 }
