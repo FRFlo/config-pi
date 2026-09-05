@@ -54,7 +54,7 @@ export function loadDiscordBridgeConfig(): DiscordBridgeConfig {
 		enabled: true,
 		endpoint: process.env.PI_BRIDGE_ENDPOINT || "https://your-bridge-url.example.com",
 		apiKey: process.env.PI_BRIDGE_API_KEY || "",
-		timeoutSeconds: 45,
+		timeoutSeconds: 0,
 		channelId: "your-discord-channel-id",
 	};
 
@@ -164,7 +164,7 @@ export async function askDiscordQuestion(
 				recentMessages: params.recentMessages,
 				options: params.options,
 				multiSelect: params.multiSelect,
-				timeoutSeconds: params.timeoutSeconds || 300,
+				timeoutSeconds: typeof params.timeoutSeconds === "number" ? params.timeoutSeconds : 0,
 				channelId: cfg.channelId,
 			}),
 			signal,

@@ -243,7 +243,7 @@ async function askTextMode(
 	context: string | undefined,
 ): Promise<{ answers: AskAnswer[] | null; retry?: boolean }> {
 	const discordConfig = loadDiscordBridgeConfig();
-	const timeoutSeconds = discordConfig.enabled !== false ? discordConfig.timeoutSeconds || 45 : 0;
+	const timeoutSeconds = discordConfig.enabled !== false ? (typeof discordConfig.timeoutSeconds === "number" ? discordConfig.timeoutSeconds : 0) : -1;
 
 	return ctx.ui.custom<{ answers: AskAnswer[] | null; retry?: boolean }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null; retry?: boolean }) => void) => {
 		let cachedLines: string[] | undefined;
@@ -309,7 +309,7 @@ async function askTextMode(
 						details,
 						context,
 						recentMessages,
-						timeoutSeconds: 300,
+						timeoutSeconds: 0,
 					},
 					abortCtrl.signal,
 					discordConfig,
@@ -327,6 +327,9 @@ async function askTextMode(
 							safeDone({ answers: null, retry: true });
 						} else if (res.status === "cancelled") {
 							safeDone({ answers: null });
+						} else if (res.status === "timeout") {
+							delegationStatus = "Question toujours active sur Discord (sans limite de temps)";
+							refresh();
 						} else {
 							delegationStatus = `Erreur Discord: ${res.error || "Pas de réponse"}`;
 							refresh();
@@ -490,7 +493,7 @@ async function askSingleChoice(
 						recentMessages,
 						options,
 						multiSelect: false,
-						timeoutSeconds: 300,
+						timeoutSeconds: 0,
 					},
 					abortCtrl.signal,
 					discordConfig,
@@ -526,6 +529,9 @@ async function askSingleChoice(
 							safeDone({ answers: null, retry: true });
 						} else if (res.status === "cancelled") {
 							safeDone({ answers: null });
+						} else if (res.status === "timeout") {
+							delegationStatus = "Question toujours active sur Discord (sans limite de temps)";
+							refresh();
 						} else {
 							delegationStatus = `Erreur Discord: ${res.error || "Pas de réponse"}`;
 							refresh();
@@ -767,7 +773,7 @@ async function askMultiChoice(
 						recentMessages,
 						options,
 						multiSelect: true,
-						timeoutSeconds: 300,
+						timeoutSeconds: 0,
 					},
 					abortCtrl.signal,
 					discordConfig,
@@ -796,6 +802,9 @@ async function askMultiChoice(
 							safeDone({ answers: null, retry: true });
 						} else if (res.status === "cancelled") {
 							safeDone({ answers: null });
+						} else if (res.status === "timeout") {
+							delegationStatus = "Question toujours active sur Discord (sans limite de temps)";
+							refresh();
 						} else {
 							delegationStatus = `Erreur Discord: ${res.error || "Pas de réponse"}`;
 							refresh();
