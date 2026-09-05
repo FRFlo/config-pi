@@ -159,18 +159,28 @@ function readNamespacedConfig(path: string, base: Config): Partial<Config> {
 export function loadConfig(cwd: string, env: NodeJS.ProcessEnv = process.env): Config {
 	const globalPath = join(getAgentDir(), "settings.json");
 	const projectPath = join(cwd, ".pi", "settings.json");
+	const globalPrefsPath = join(getAgentDir(), "preferences.json");
+	const projectPrefsPath = join(cwd, ".pi", "preferences.json");
+
 	const globalConfig = readNamespacedConfig(globalPath, DEFAULTS);
 	const projectConfig = readNamespacedConfig(projectPath, DEFAULTS);
+	const globalPrefsConfig = readNamespacedConfig(globalPrefsPath, DEFAULTS);
+	const projectPrefsConfig = readNamespacedConfig(projectPrefsPath, DEFAULTS);
 	const envConfig = readEnvConfig(env);
+
 	return {
 		...DEFAULTS,
 		...globalConfig,
 		...projectConfig,
+		...globalPrefsConfig,
+		...projectPrefsConfig,
 		...envConfig,
 		models: {
 			...DEFAULTS.models,
 			...globalConfig.models,
 			...projectConfig.models,
+			...globalPrefsConfig.models,
+			...projectPrefsConfig.models,
 		},
 	};
 }

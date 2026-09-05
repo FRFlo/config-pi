@@ -52,12 +52,27 @@ export interface DiscordQuestionResponse {
 export function loadDiscordBridgeConfig(): DiscordBridgeConfig {
 	const config: DiscordBridgeConfig = {
 		enabled: true,
-		endpoint: process.env.PI_BRIDGE_ENDPOINT || "https://your-bridge-url.example.com",
+		endpoint: process.env.PI_BRIDGE_ENDPOINT || "",
 		apiKey: process.env.PI_BRIDGE_API_KEY || "",
 		timeoutSeconds: 0,
-		channelId: "your-discord-channel-id",
+		channelId: process.env.PI_BRIDGE_CHANNEL_ID || "",
 	};
 
+	// 1. Lire d'abord les préférences locales (preferences.json)
+	try {
+		const prefsPath = path.join(os.homedir(), ".pi", "agent", "preferences.json");
+		if (fs.existsSync(prefsPath)) {
+			const raw = fs.readFileSync(prefsPath, "utf-8");
+			const parsed = JSON.parse(raw);
+			if (parsed.discordBridge && typeof parsed.discordBridge === "object") {
+				Object.assign(config, parsed.discordBridge);
+			}
+		}
+	} catch (_err) {
+		// Ignore parse error
+	}
+
+	// 2. Repli éventuel sur settings.json
 	try {
 		const settingsPath = path.join(os.homedir(), ".pi", "agent", "settings.json");
 		if (fs.existsSync(settingsPath)) {
@@ -257,7 +272,7 @@ export default function discordBridgeExtension(pi: ExtensionAPI) {
 		label: "send_discord_message",
 		description:
 			"Send a message, report, or notification directly to the user on Discord with full Discord Markdown support.",
-		promptSnippet: "Send an informational notification or status report to Flo on Discord.",
+		promptSnippet: "Send an informational notification or status report to the user on Discord.",
 		promptGuidelines: [
 			"Use this tool to inform the user about task completions, critical alerts, or background progress on Discord.",
 			"Supports full Discord Markdown formatting (bold, italics, code blocks, lists, quotes).",

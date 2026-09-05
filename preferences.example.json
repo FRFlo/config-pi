@@ -1,0 +1,33 @@
+{
+  "defaultProvider": "antigravity",
+  "defaultModel": "gemini-3.8-flash",
+  "theme": "dark",
+  "hideThinkingBlock": false,
+  "discordBridge": {
+    "enabled": false,
+    "endpoint": "https://your-bridge-url.example.com",
+    "apiKey": "your-api-key-here",
+    "timeoutSeconds": 0,
+    "channelId": "your-channel-id-here"
+  },
+  "mcp": {
+    "context7ApiKey": "your-context7-api-key-here"
+  },
+  "observational-memory": {
+    "backend": "sqlite",
+    "models": {
+      "observer": {
+        "provider": "antigravity",
+        "id": "gemini-3.7-flash"
+      },
+      "consolidator": {
+        "provider": "antigravity",
+        "id": "gemini-3.7-flash"
+      }
+    }
+  },
+  "webSearch": {
+    "provider": "antigravity",
+    "model": "gemini-3.7-flash"
+  }
+}

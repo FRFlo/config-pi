@@ -100,7 +100,7 @@ export function resolveTerminalSettings(raw: TerminalSettings | undefined): Reso
 	};
 }
 
-/** Load and merge terminal-tool settings from global + project settings.json. */
+/** Load and merge terminal-tool settings from global + project settings.json and preferences.json. */
 export function loadTerminalSettings(cwd?: string): ResolvedTerminalSettings {
 	let raw: TerminalSettings = {};
 	try {
@@ -109,11 +109,21 @@ export function loadTerminalSettings(cwd?: string): ResolvedTerminalSettings {
 			const globalJson = JSON.parse(fs.readFileSync(globalPath, "utf-8"));
 			if (globalJson.terminal) raw = { ...raw, ...globalJson.terminal };
 		}
+		const globalPrefsPath = path.join(os.homedir(), ".pi", "agent", "preferences.json");
+		if (fs.existsSync(globalPrefsPath)) {
+			const prefsJson = JSON.parse(fs.readFileSync(globalPrefsPath, "utf-8"));
+			if (prefsJson.terminal) raw = { ...raw, ...prefsJson.terminal };
+		}
 		if (cwd) {
 			const projectPath = path.join(cwd, ".pi", "settings.json");
 			if (fs.existsSync(projectPath)) {
 				const projectJson = JSON.parse(fs.readFileSync(projectPath, "utf-8"));
 				if (projectJson.terminal) raw = { ...raw, ...projectJson.terminal };
+			}
+			const projectPrefsPath = path.join(cwd, ".pi", "preferences.json");
+			if (fs.existsSync(projectPrefsPath)) {
+				const projectPrefsJson = JSON.parse(fs.readFileSync(projectPrefsPath, "utf-8"));
+				if (projectPrefsJson.terminal) raw = { ...raw, ...projectPrefsJson.terminal };
 			}
 		}
 	} catch {
@@ -129,11 +139,21 @@ export function getShellPathFromSettings(cwd?: string): string | undefined {
 			const globalJson = JSON.parse(fs.readFileSync(globalPath, "utf-8"));
 			if (globalJson.shellPath) return globalJson.shellPath;
 		}
+		const globalPrefsPath = path.join(os.homedir(), ".pi", "agent", "preferences.json");
+		if (fs.existsSync(globalPrefsPath)) {
+			const prefsJson = JSON.parse(fs.readFileSync(globalPrefsPath, "utf-8"));
+			if (prefsJson.shellPath) return prefsJson.shellPath;
+		}
 		if (cwd) {
 			const projectPath = path.join(cwd, ".pi", "settings.json");
 			if (fs.existsSync(projectPath)) {
 				const projectJson = JSON.parse(fs.readFileSync(projectPath, "utf-8"));
 				if (projectJson.shellPath) return projectJson.shellPath;
+			}
+			const projectPrefsPath = path.join(cwd, ".pi", "preferences.json");
+			if (fs.existsSync(projectPrefsPath)) {
+				const projectPrefsJson = JSON.parse(fs.readFileSync(projectPrefsPath, "utf-8"));
+				if (projectPrefsJson.shellPath) return projectPrefsJson.shellPath;
 			}
 		}
 	} catch {
