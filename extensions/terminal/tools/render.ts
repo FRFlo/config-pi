@@ -1,4 +1,5 @@
 import { Text, truncateToVisualLines } from "../utils/visual-truncate.ts";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { BashOutputInput, bashOutputSchema } from "./bash-output.ts";
 import type { MonitorInput, monitorSchema } from "./monitor.ts";
@@ -23,9 +24,12 @@ class BashOutputResultComponent {
 	}
 
 	render(width: number): string[] {
-		if (!this.#isPartial || this.#expanded) return this.#text.split("\n");
-		return truncateToVisualLines(this.#text, OUTPUT_PREVIEW_LINES, Math.max(1, width)).visualLines.map((line) =>
-			line.trimEnd(),
+		const renderWidth = Math.max(1, width);
+		if (!this.#isPartial || this.#expanded) {
+			return this.#text.split("\n").map((line) => truncateToWidth(line, renderWidth, ""));
+		}
+		return truncateToVisualLines(this.#text, OUTPUT_PREVIEW_LINES, renderWidth).visualLines.map((line) =>
+			truncateToWidth(line.trimEnd(), renderWidth, ""),
 		);
 	}
 
