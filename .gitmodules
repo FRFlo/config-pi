@@ -14,3 +14,6 @@
 	path = git/github.com/FRFlo/pi-quotas
 	url = https://github.com/FRFlo/pi-quotas.git
 	branch = main
+[submodule "git/github.com/FRFlo/pi-interactive-subagents"]
+	path = git/github.com/FRFlo/pi-interactive-subagents
+	url = https://github.com/FRFlo/pi-interactive-subagents.git
