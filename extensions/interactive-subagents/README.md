@@ -1,18 +1,15 @@
 # pi-interactive-subagents
 
-Async subagents for [pi](https://github.com/badlogic/pi-mono), running in tmux panes. Spawn a sub-agent, keep working in the main session, and get the result steered back when it finishes. Fully non-blocking.
+Async subagents for [pi](https://github.com/badlogic/pi-mono), running as native in-process Pi sessions. Spawn a sub-agent, keep working in the main session, and get the result steered back when it finishes. Fully non-blocking.
 
-**tmux/psmux fork.** See [Acknowledgements](#acknowledgements) for the upstream project, which also supports cmux, zellij, and WezTerm.
+The Pi runtime uses the SDK directly; no tmux/psmux process or pane is created for Pi subagents.
 
-On Windows, psmux is treated as a native backend rather than as a `tmux` alias:
-the extension selects the `psmux`/`pmux` CLI when it detects `PSMUX_SESSION`,
-uses psmux `send-paste` for safe text delivery, writes PowerShell launch
-scripts, sets environment variables through `$env:*`, and uses psmux pane titles
-for subagent labels. Unix tmux keeps the existing Bash launch path.
+Legacy multiplexer helpers remain only for compatibility with older session
+artifacts; the Pi subagent launch path does not invoke them.
 
 ## How it works
 
-`subagent()` returns immediately. The sub-agent runs in its own tmux pane — a right split off the parent pi pane, so pane creation never steals keyboard focus. A live widget above the input tracks every running sub-agent, and when one finishes, its result is steered into the main session as a notification that triggers a new turn.
+`subagent()` returns immediately. The sub-agent runs in its own in-process `AgentSession`, so spawning never steals keyboard focus. A live widget above the input tracks every running sub-agent, and when one finishes, its result is steered into the main session as a notification that triggers a new turn.
 
 ```
 ╭─ Subagents ──────────────────────────── 2 running ─╮
@@ -184,13 +181,16 @@ Status display is configured via `config.json` in the extension directory (copy 
 ## Requirements
 
 - [pi](https://github.com/badlogic/pi-mono)
-- [tmux](https://github.com/tmux/tmux) on Unix-like systems, or [psmux](https://github.com/psmux/psmux) on Windows.
+- No terminal multiplexer is required for Pi subagents.
 
-```bash
-tmux new -A -s pi 'pi'
-# or on Windows:
-psmux new-session -s pi
-```
+Start Pi normally with `pi`.
+
+### Compatibility note
+
+Pi-backed agents are native and isolated by their own session file, model
+registry, active-tool list, and lifecycle watcher. Legacy `cli: claude` agent
+definitions still require the compatibility launcher and are not available in
+the native path.
 
 ## Acknowledgements
 
