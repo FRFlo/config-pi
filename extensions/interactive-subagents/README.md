@@ -201,7 +201,9 @@ Start Pi normally with `pi`.
 Pi-backed agents are native and isolated by their own session file, model
 registry, active-tool list, and lifecycle watcher. Legacy `cli: claude` agent
 definitions still require the compatibility launcher and are not available in
-the native path.
+the native path. Native agents inherit all registered non-MCP tools. MCP tools
+remain session-scoped: an MCP activated by the orchestrator is not loaded into
+the child, and an MCP activated by the child is not exposed to the orchestrator.
 
 ## Acknowledgements
 
