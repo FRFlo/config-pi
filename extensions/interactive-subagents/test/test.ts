@@ -1195,6 +1195,7 @@ describe("subagent discovery", () => {
     for (const t of ["subagent", "subagent_message", "subagents_list"]) {
       assert.ok(tools.has(t), `expected spawning tool ${t} in worker allowlist`);
     }
+    assert.ok(tools.has("ask_question"), "expected worker to keep ask_question");
     assert.ok(tools.has("bash"), "expected worker to keep bash");
   });
 
@@ -1203,6 +1204,16 @@ describe("subagent discovery", () => {
       const defs = testApi.loadAgentDefaults(name);
       assert.ok(defs, `expected bundled agent ${name} to be discoverable`);
       assert.equal(defs.subagentAgents, undefined, `${name} should not declare subagent_agents`);
+    }
+  });
+
+  it("scout and researcher can ask the parent for clarification", () => {
+    for (const name of ["scout", "researcher"]) {
+      const defs = testApi.loadAgentDefaults(name);
+      assert.ok(defs, `expected bundled agent ${name} to be discoverable`);
+      const allowlist = testApi.buildSubagentToolAllowlist(defs.tools);
+      assert.ok(allowlist, `expected an allowlist for ${name}`);
+      assert.ok(allowlist!.split(",").includes("ask_question"));
     }
   });
 

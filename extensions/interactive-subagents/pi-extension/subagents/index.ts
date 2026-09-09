@@ -1,8 +1,7 @@
 import {
-  AuthStorage,
   createAgentSession,
   createCodingTools,
-  ModelRegistry,
+  DefaultResourceLoader,
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -1164,8 +1163,20 @@ async function createNativeSubagentSession(options: {
   name: string;
 }): Promise<any> {
   const sessionManager = SessionManager.open(options.sessionFile, options.sessionDir);
-  const authStorage = AuthStorage.create(join(options.agentDir, "auth.json"));
-  const modelRegistry = ModelRegistry.create(authStorage, join(options.agentDir, "models.json"));
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: options.cwd,
+    agentDir: options.agentDir,
+    // A child must not scan and initialize every extension from the parent
+    // installation. Some extensions target a different Pi SDK build and can
+    // fail during startup before the child gets a chance to run.
+    noExtensions: true,
+    additionalExtensionPaths: [
+      join(SUBAGENTS_DIR, "index.ts"),
+      join(SUBAGENTS_DIR, "subagent-done.ts"),
+      join(SUBAGENTS_DIR, "../../../ask-user-question.ts"),
+    ],
+  });
+  await resourceLoader.reload();
 
   // The extension loader reads these while constructing the child runtime.
   // Set them before createAgentSession, not after it.
@@ -1178,21 +1189,11 @@ async function createNativeSubagentSession(options: {
   process.env.PI_SUBAGENT_AGENT = options.agentName;
   process.env.PI_SUBAGENT_SESSION = options.sessionFile;
 
-  let model: any;
-  if (options.model) {
-    const slash = options.model.indexOf("/");
-    const provider = slash > 0 ? options.model.slice(0, slash) : undefined;
-    const modelId = slash > 0 ? options.model.slice(slash + 1) : options.model;
-    if (provider) model = modelRegistry.find(provider, modelId);
-  }
-
   const result = await createAgentSession({
     cwd: options.cwd,
     agentDir: options.agentDir,
-    authStorage,
-    modelRegistry,
     sessionManager,
-    ...(model ? { model } : {}),
+    resourceLoader,
     ...(options.thinking ? { thinkingLevel: options.thinking as any } : {}),
     ...(options.tools
       ? {
@@ -2584,6 +2585,30 @@ export default function subagentsExtension(pi: ExtensionAPI) {
       const displayName = agentName[0].toUpperCase() + agentName.slice(1);
       const toolCall = `Use subagent with agent: "${agentName}", name: "${displayName}", task: ${JSON.stringify(taskText)}`;
       pi.sendUserMessage(toolCall);
+    },
+  });
+
+  // Enter a running native subagent directly from the parent UI. This keeps
+  // the parent focused while providing the same correction loop as the old
+  // pane-based workflow.
+  pi.registerCommand("subagent-enter", {
+    description: "Entrer dans un subagent actif et lui envoyer un message",
+    handler: async (args, ctx) => {
+      const name = args.trim();
+      if (!name) {
+        ctx.ui.notify("Usage: /subagent-enter <nom>", "warning");
+        return;
+      }
+      const resolved = resolveRunningByName(name);
+      if ("error" in resolved) {
+        ctx.ui.notify(resolved.error, "error");
+        return;
+      }
+      const message = await ctx.ui.input(`Message pour ${name}`, "Correction ou information à transmettre");
+      if (!message?.trim()) return;
+      const result = handleSubagentSteer({ name, message });
+      if (result.details?.error) ctx.ui.notify(String(result.details.error), "error");
+      else ctx.ui.notify(`Message envoyé à ${name}`, "info");
     },
   });
 

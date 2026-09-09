@@ -1015,7 +1015,7 @@ function withUILock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 export default function askUserQuestion(pi: ExtensionAPI) {
-	pi.registerTool({
+	const askUserQuestionTool = {
 		name: "ask_user_question",
 		label: "ask_user_question",
 		description:
@@ -1117,7 +1117,12 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 			const answerSummary = formatAnswersForContent(details.answers);
 			return new Text(theme.fg("success", "✓ ") + theme.fg("text", answerSummary), 0, 0);
 		},
-	});
+	};
+
+	pi.registerTool(askUserQuestionTool);
+	// Compatibility alias for subagent profiles that use the shorter tool name.
+	// Both names share the exact same UI, validation, locking and result format.
+	pi.registerTool({ ...askUserQuestionTool, name: "ask_question", label: "ask_question" });
 
 	let consecutiveSteers = 0;
 
