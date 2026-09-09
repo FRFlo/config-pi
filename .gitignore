@@ -39,3 +39,4 @@ bin/fd.exe
 bin/rg.exe
 .profile/
 **/.profile/
+.gitnexus
