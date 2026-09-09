@@ -5,7 +5,7 @@
  *
  * Subagents do NOT self-terminate via a tool. Auto-exit agents shut down
  * automatically when their agent loop ends (see the `agent_end` handler);
- * interactive agents end when the human exits the pane.
+ * interactive agents end when their native session completes.
  *
  * `ask_question` keeps the session OPEN: it writes a `${sessionFile}.ask`
  * signal the parent's watcher picks up, parks the session in a "waiting" state

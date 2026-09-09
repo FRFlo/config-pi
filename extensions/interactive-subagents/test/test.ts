@@ -30,7 +30,6 @@ import {
   summarizeSessionStats,
 } from "../pi-extension/subagents/session.ts";
 
-import { shellEscape } from "../pi-extension/subagents/tmux.ts";
 import {
   advanceStatusState,
   capStatusLines,
@@ -56,7 +55,6 @@ import {
   runningChildrenCount,
 } from "../pi-extension/subagents/subagent-done.ts";
 import subagentDoneExtension from "../pi-extension/subagents/subagent-done.ts";
-import { __pollForExitTest__ } from "../pi-extension/subagents/tmux.ts";
 
 // --- Helpers ---
 
@@ -1297,87 +1295,6 @@ describe("subagent discovery", () => {
     assert.equal(testApi.buildSubagentToolAllowlist(""), null);
   });
 
-  it("applySandboxToParts replays model, identity, and default-deny tool restriction", () => {
-    withTempDir((d) => {
-      const parts: string[] = [];
-      testApi.applySandboxToParts(
-        parts,
-        {
-          agent: "worker",
-          toolAllowlist: "read,write,safe_bash",
-          model: "openrouter/z-ai/glm-5.2",
-          thinking: "medium",
-          systemPromptMode: "append",
-          identity: "You are a worker.",
-          spawnable: ["scout"],
-          autoExit: true,
-          cwd: null,
-          agentDir: null,
-        },
-        { artifactDir: d, name: "worker" },
-      );
-      const joined = parts.join(" ");
-      // Model with thinking suffix.
-      assert.ok(joined.includes("--model"), "expected --model");
-      assert.ok(joined.includes("openrouter/z-ai/glm-5.2:medium"), "expected model:thinking");
-      // Identity written to a file and appended.
-      assert.ok(joined.includes("--append-system-prompt"), "expected --append-system-prompt");
-      // Default-deny restriction.
-      assert.ok(parts.includes("--no-extensions"), "expected --no-extensions");
-      const toolsIdx = parts.indexOf("--tools");
-      assert.ok(toolsIdx >= 0, "expected --tools");
-      // The value is shell-escaped (single-quoted) before joining.
-      assert.ok(
-        parts[toolsIdx + 1].includes("read,write,safe_bash"),
-        "expected the tool allowlist as the --tools value",
-      );
-    });
-  });
-
-  it("applySandboxToParts omits restriction flags when the loadout was unrestricted", () => {
-    withTempDir((d) => {
-      const parts: string[] = [];
-      testApi.applySandboxToParts(
-        parts,
-        {
-          agent: null,
-          toolAllowlist: null,
-          model: null,
-          thinking: null,
-          systemPromptMode: null,
-          identity: null,
-          spawnable: null,
-          autoExit: false,
-          cwd: null,
-          agentDir: null,
-        },
-        { artifactDir: d, name: "fork" },
-      );
-      assert.deepEqual(parts, []);
-    });
-  });
-
-  it("buildPiPromptArgs inserts separator for artifact-backed launches with skills", () => {
-    assert.deepEqual(
-      testApi.buildPiPromptArgs({ effectiveSkills: "review,lint", taskDelivery: "artifact", taskArg: "@artifact.md" }),
-      ["", "/skill:review", "/skill:lint", "@artifact.md"],
-    );
-  });
-
-  it("buildPiPromptArgs omits separator for artifact-backed launches without skills", () => {
-    assert.deepEqual(
-      testApi.buildPiPromptArgs({ effectiveSkills: undefined, taskDelivery: "artifact", taskArg: "@artifact.md" }),
-      ["@artifact.md"],
-    );
-  });
-
-  it("buildPiPromptArgs omits separator for direct launches with skills", () => {
-    assert.deepEqual(
-      testApi.buildPiPromptArgs({ effectiveSkills: "review", taskDelivery: "direct", taskArg: "do the task" }),
-      ["/skill:review", "do the task"],
-    );
-  });
-
   it("lists visible agents from discovery", async () => {
     await withIsolatedAgentEnv(async ({ projectAgentsDir }) => {
       writeAgentFile(
@@ -1754,52 +1671,6 @@ describe("subagent-done.ts", () => {
   });
 });
 
-describe("tmux.ts interpretExitSidecar", () => {
-  const { interpretExitSidecar } = __pollForExitTest__;
-
-  it("no longer decodes ping payloads (ask_question keeps the session open instead)", () => {
-    // ask_question writes a `.ask` signal, not a `.exit` ping sidecar, so an
-    // unknown `type: "ping"` payload now falls through to a clean done.
-    assert.deepEqual(
-      interpretExitSidecar({ type: "ping", name: "Worker", message: "need help" }),
-      { reason: "done", exitCode: 0 },
-    );
-  });
-
-  it("decodes done payloads", () => {
-    assert.deepEqual(interpretExitSidecar({ type: "done" }), {
-      reason: "done",
-      exitCode: 0,
-    });
-  });
-
-  it("decodes error payloads and propagates the message with a non-zero exit code", () => {
-    assert.deepEqual(
-      interpretExitSidecar({
-        type: "error",
-        errorMessage: "Anthropic 529 Overloaded after 3 retries",
-        stopReason: "error",
-      }),
-      {
-        reason: "error",
-        exitCode: 1,
-        errorMessage: "Anthropic 529 Overloaded after 3 retries",
-      },
-    );
-  });
-
-  it("falls back to a placeholder when error payload has no errorMessage", () => {
-    const result = interpretExitSidecar({ type: "error" });
-    assert.equal(result.reason, "error");
-    assert.equal(result.exitCode, 1);
-    assert.match(result.errorMessage ?? "", /no errorMessage/);
-  });
-
-  it("treats unknown payload shapes as done", () => {
-    assert.deepEqual(interpretExitSidecar({}), { reason: "done", exitCode: 0 });
-    assert.deepEqual(interpretExitSidecar(null), { reason: "done", exitCode: 0 });
-  });
-});
 describe("commands", () => {
   it("/subagent emits a spawn tool call for a known agent", () => {
     const { api, registeredCommands, sentUserMessages } = createMockExtensionApi();
@@ -1881,8 +1752,8 @@ describe("tool registration", () => {
       ["agent", "task"],
       "agent and task must be required",
     );
-    // `name` is now optional and purely cosmetic.
-    assert.match(props.name.description, /cosmetic/i);
+    // `name` is now optional and only controls the display label.
+    assert.match(props.name.description, /display/i);
     // The removed override knobs must be gone.
     for (const gone of ["tools", "skills", "systemPrompt", "fork", "interactive", "resumeSessionId"]) {
       assert.equal(props[gone], undefined, `expected ${gone} param to be removed`);
@@ -2121,7 +1992,6 @@ describe("subagent interruption", () => {
       id: "a1",
       name: "Worker",
       task: "",
-      surface: "pane-1",
       startTime: 0,
       sessionFile: "worker.jsonl",
       interactive: false,
@@ -2145,9 +2015,9 @@ describe("subagent interruption", () => {
     runningMap.clear();
 
     try {
-      runningMap.set("a1", makeRunning({ id: "a1", name: "Worker", surface: "a1", sessionFile: "a1.jsonl" }));
-      runningMap.set("b2", makeRunning({ id: "b2", name: "Worker", surface: "b2", sessionFile: "b2.jsonl" }));
-      runningMap.set("c3", makeRunning({ id: "c3", name: "Scout", surface: "c3", sessionFile: "c3.jsonl" }));
+      runningMap.set("a1", makeRunning({ id: "a1", name: "Worker", sessionFile: "a1.jsonl" }));
+      runningMap.set("b2", makeRunning({ id: "b2", name: "Worker", sessionFile: "b2.jsonl" }));
+      runningMap.set("c3", makeRunning({ id: "c3", name: "Scout", sessionFile: "c3.jsonl" }));
 
       const byName = testApi.resolveRunningByName("Scout");
       assert.equal(byName.running.id, "c3");
@@ -2171,10 +2041,10 @@ describe("subagent interruption", () => {
       // No collision: base name is returned untouched.
       assert.equal(testApi.uniqueRunningName("worker"), "worker");
 
-      runningMap.set("a1", makeRunning({ id: "a1", name: "worker", surface: "a1" }));
+      runningMap.set("a1", makeRunning({ id: "a1", name: "worker" }));
       assert.equal(testApi.uniqueRunningName("worker"), "worker-2");
 
-      runningMap.set("b2", makeRunning({ id: "b2", name: "worker-2", surface: "b2" }));
+      runningMap.set("b2", makeRunning({ id: "b2", name: "worker-2" }));
       assert.equal(testApi.uniqueRunningName("worker"), "worker-3");
 
       // A distinct base is unaffected by the worker collisions.
@@ -2227,38 +2097,9 @@ describe("subagent interruption", () => {
     }
   });
 
-  it("steers a running subagent by typing into its pane (newlines flattened)", () => {
-    const testApi = (subagentsModule as any).__test__;
-    let sentSurface = "";
-    let sentText = "";
-    const running = makeRunning();
-
-    const result = testApi.steerSubagent(running, "do this\nthen that", (surface: string, text: string) => {
-      sentSurface = surface;
-      sentText = text;
-    });
-
-    assert.deepEqual(result, { ok: true });
-    assert.equal(sentSurface, "pane-1");
-    assert.equal(sentText, "do this then that");
-  });
-
-  it("returns an explicit error when steering delivery fails", () => {
-    const testApi = (subagentsModule as any).__test__;
-    const running = makeRunning();
-
-    const result = testApi.steerSubagent(running, "hi", () => {
-      throw new Error("mux write failed");
-    });
-
-    assert.match(result.error, /Failed to deliver message/);
-  });
-
   it("delivers a steer message and forces local status waiting", () => {
     const testApi = (subagentsModule as any).__test__;
     const runningMap = testApi.runningSubagents as Map<string, any>;
-    let sentSurface = "";
-    let sentText = "";
     runningMap.clear();
 
     const activeState = observeStatus(
@@ -2277,17 +2118,15 @@ describe("subagent interruption", () => {
     );
 
     try {
-      runningMap.set("a1", makeRunning({ statusState: activeState }));
+      runningMap.set("a1", makeRunning({
+        statusState: activeState,
+        nativeSession: { steer: () => {} },
+      }));
 
       const result = withMockedNow(20_000, () =>
-        testApi.handleSubagentSteer({ name: "Worker", message: "keep going" }, (surface: string, text: string) => {
-          sentSurface = surface;
-          sentText = text;
-        }),
+        testApi.handleSubagentSteer({ name: "Worker", message: "keep going" }),
       );
 
-      assert.equal(sentSurface, "pane-1");
-      assert.equal(sentText, "keep going");
       assert.equal(result.content[0].text.includes('Message delivered to running subagent "Worker"'), true);
       assert.deepEqual(result.details, { id: "a1", name: "Worker", status: "steered" });
       const snapshot = classifyStatus(runningMap.get("a1").statusState, 20_000);
@@ -2306,42 +2145,6 @@ describe("subagent interruption", () => {
       runningMap.set("a1", makeRunning());
       const result = testApi.handleSubagentSteer({ name: "Worker", message: "  " }, () => {});
       assert.match(result.content[0].text, /`message` is required/);
-    } finally {
-      runningMap.clear();
-    }
-  });
-
-  it("leaves status unchanged when steering delivery fails in the tool path", () => {
-    const testApi = (subagentsModule as any).__test__;
-    const runningMap = testApi.runningSubagents as Map<string, any>;
-    runningMap.clear();
-
-    const activeState = observeStatus(
-      createStatusState({ source: "pi", startTimeMs: 0 }),
-      {
-        snapshot: "present",
-        updatedAt: 5_000,
-        sequence: 1,
-        phase: "active",
-        active: true,
-        activeScope: "tool",
-        activeSince: 5_000,
-        activityLabel: "bash",
-      },
-      5_000,
-    );
-
-    try {
-      runningMap.set("a1", makeRunning({ statusState: activeState }));
-
-      const result = withMockedNow(20_000, () =>
-        testApi.handleSubagentSteer({ name: "Worker", message: "go" }, () => {
-          throw new Error("mux write failed");
-        }),
-      );
-
-      assert.match(result.content[0].text, /Failed to deliver message/);
-      assert.equal(classifyStatus(runningMap.get("a1").statusState, 20_000).kind, "active");
     } finally {
       runningMap.clear();
     }
@@ -2472,37 +2275,6 @@ describe("subagent status renderer", () => {
   });
 });
 
-describe("subagent startup delay", () => {
-  it("defaults to 500ms when no env var is set", () => {
-    const testApi = (subagentsModule as any).__test__;
-    assert.ok(testApi, "expected subagents test helpers to be exported");
-    assert.equal(typeof testApi.getShellReadyDelayMs, "function");
-
-    const original = process.env.PI_SUBAGENT_SHELL_READY_DELAY_MS;
-    delete process.env.PI_SUBAGENT_SHELL_READY_DELAY_MS;
-    try {
-      assert.equal(testApi.getShellReadyDelayMs(), 500);
-    } finally {
-      if (original == null) delete process.env.PI_SUBAGENT_SHELL_READY_DELAY_MS;
-      else process.env.PI_SUBAGENT_SHELL_READY_DELAY_MS = original;
-    }
-  });
-
-  it("uses PI_SUBAGENT_SHELL_READY_DELAY_MS when it is set", () => {
-    const testApi = (subagentsModule as any).__test__;
-    assert.ok(testApi, "expected subagents test helpers to be exported");
-    assert.equal(typeof testApi.getShellReadyDelayMs, "function");
-
-    const original = process.env.PI_SUBAGENT_SHELL_READY_DELAY_MS;
-    process.env.PI_SUBAGENT_SHELL_READY_DELAY_MS = "2500";
-    try {
-      assert.equal(testApi.getShellReadyDelayMs(), 2500);
-    } finally {
-      if (original == null) delete process.env.PI_SUBAGENT_SHELL_READY_DELAY_MS;
-      else process.env.PI_SUBAGENT_SHELL_READY_DELAY_MS = original;
-    }
-  });
-});
 describe("subagents widget rendering", () => {
   it("keeps every rendered line within a very narrow width", () => {
     const testApi = (subagentsModule as any).__test__;
@@ -2665,27 +2437,3 @@ describe("subagent display helpers", () => {
   });
 });
 
-describe("tmux.ts", () => {
-  describe("shellEscape", () => {
-    it("wraps in single quotes", () => {
-      assert.equal(shellEscape("hello"), "'hello'");
-    });
-
-    it("escapes single quotes", () => {
-      assert.equal(shellEscape("it's"), "'it'\\''s'");
-    });
-
-    it("handles empty string", () => {
-      assert.equal(shellEscape(""), "''");
-    });
-
-    it("handles special characters", () => {
-      const input = 'echo "hello $world" && rm -rf /';
-      const escaped = shellEscape(input);
-      assert.ok(escaped.startsWith("'"));
-      assert.ok(escaped.endsWith("'"));
-      // Inside single quotes, everything is literal
-      assert.ok(escaped.includes("$world"));
-    });
-  });
-});
