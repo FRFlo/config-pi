@@ -1,6 +1,12 @@
 import {
   createAgentSession,
-  createCodingTools,
+  createBashTool,
+  createEditTool,
+  createFindTool,
+  createGrepTool,
+  createLsTool,
+  createReadTool,
+  createWriteTool,
   DefaultResourceLoader,
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
@@ -751,6 +757,19 @@ function updateWidget() {
 }
 
 const SUBAGENT_CONTROL_TOOLS = ["ask_question"] as const;
+const NATIVE_BUILTIN_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find", "ls"] as const;
+
+function createNativeBuiltinTools(cwd: string) {
+  return [
+    createReadTool(cwd),
+    createBashTool(cwd),
+    createEditTool(cwd),
+    createWriteTool(cwd),
+    createGrepTool(cwd),
+    createFindTool(cwd),
+    createLsTool(cwd),
+  ];
+}
 
 /**
  * Build the child --tools allowlist.
@@ -1064,7 +1083,11 @@ async function createNativeSubagentSession(options: {
     sessionManager,
     resourceLoader,
     ...(options.thinking ? { thinkingLevel: options.thinking as any } : {}),
-    tools: createCodingTools(options.cwd),
+    // Register every built-in tool explicitly. `createCodingTools()` only
+    // contains read/bash/edit/write; native children must also receive the
+    // discovery tools (grep/find/ls), otherwise their allowlist can resolve
+    // to an empty set when the parent session has extension tools enabled.
+    tools: createNativeBuiltinTools(options.cwd),
     // The child extension reads these values for identity and ask_question.
     sessionStartEvent: { type: "session_start", reason: "new" },
   });
@@ -1180,6 +1203,8 @@ export const __test__ = {
   formatContextUsage,
   contextWindowFor,
   formatUsageSegments,
+  createNativeBuiltinTools,
+  NATIVE_BUILTIN_TOOL_NAMES,
   widgetIcon,
 };
 

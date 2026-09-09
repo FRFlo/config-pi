@@ -1698,6 +1698,16 @@ describe("commands", () => {
 });
 
 describe("tool registration", () => {
+  it("builds the complete native built-in tool set", () => {
+    const testApi = (subagentsModule as any).__test__;
+    const tools = testApi.createNativeBuiltinTools(process.cwd());
+    assert.deepEqual(
+      tools.map((tool: { name: string }) => tool.name),
+      ["read", "bash", "edit", "write", "grep", "find", "ls"],
+    );
+    assert.deepEqual(testApi.NATIVE_BUILTIN_TOOL_NAMES, ["read", "bash", "edit", "write", "grep", "find", "ls"]);
+  });
+
   it("always resumes subagents as autonomous (auto-exit, non-interactive tracking)", () => {
     const testApi = (subagentsModule as any).__test__;
 

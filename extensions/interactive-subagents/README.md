@@ -143,7 +143,16 @@ Controls whether `stalled`/`recovered` status transitions send a steer message t
 
 ## Tool access control
 
-Access is **whitelist-only**. Every sub-agent process is launched with `--no-extensions` (extension discovery disabled) and `--tools <allowlist>`; only the extensions backing the listed tools are loaded back in explicitly. There is no default toolset and no deny-list — an agent gets exactly what its frontmatter lists. The restriction survives resume via the loadout snapshot.
+Access is **session-scoped**. Every sub-agent process is launched with
+`--no-extensions` (extension discovery disabled); its built-in tools are
+registered explicitly and extension-backed tools are loaded back in from the
+child configuration. MCP tools are excluded. The resolved loadout is stored
+for resume.
+
+Native Pi sessions always register the complete built-in tool set (`read`,
+`write`, `edit`, `bash`, `grep`, `find`, and `ls`). Extension-backed tools are
+loaded separately from the child session's own configuration; MCP tools remain
+session-scoped and are never inherited.
 
 Spawns must name a known agent at **every** depth. A top-level session may spawn anything discoverable; a sub-agent may only spawn the agents in its `subagent_agents` list (enforced via `PI_SUBAGENT_ALLOWED`). There is no agentless spawn route, so a child can never escalate to a full-toolset profile by omitting its agent.
 
