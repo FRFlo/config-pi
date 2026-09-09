@@ -1120,7 +1120,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 	};
 
 	pi.registerTool(askUserQuestionTool);
-	// Compatibility alias for subagent profiles that use the shorter tool name.
+	// Compatibility alias for profiles that use the shorter tool name.
 	// Both names share the exact same UI, validation, locking and result format.
 	pi.registerTool({ ...askUserQuestionTool, name: "ask_question", label: "ask_question" });
 

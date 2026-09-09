@@ -1,14 +1,10 @@
 # bash-guard (pi extension)
 
-Intercepts agent-issued `bash` tool calls and applies different protection depending on whether
-the session is interactive (main session) or non-interactive (spawned subagent).
+Intercepts agent-issued `bash` tool calls and applies protection against destructive commands.
 
 ## Modes
 
-Behaviour is determined at registration time via the `PI_SUBAGENT_DEPTH` environment variable,
-which pi-subagents injects into every spawned process.
-
-### Main session (`PI_SUBAGENT_DEPTH` = 0 or unset) — disabled by default
+### Default mode — disabled by default
 
 Bash-guard starts disabled in the main session so normal agent work is not interrupted. The disabled mode still hard-blocks a small catastrophic floor. Run `/bash-guard` to enable interactive prompts for the current session, or start pi with `--bash-guard-enabled`.
 
@@ -27,37 +23,6 @@ When enabled, bash-guard:
 - If aborted, the tool call is blocked and the model receives a clear reason
 - Remembers recently aborted commands for 60 s to prevent retry loops
 
-### Subagent (`PI_SUBAGENT_DEPTH` ≥ 1) — headless hard-block
-
-Spawned subagents have no UI (stdin is `/dev/null`), so prompting is impossible. Instead,
-a focused set of catastrophic/unrecoverable operations is hard-blocked with no user interaction:
-
-| Pattern | Reason |
-|---|---|
-| `rm -r` / `-rf` / `-Rf` | Recursive deletion |
-| `sudo` | Elevated privileges |
-| `curl\|sh`, `wget\|sh` | Pipe to shell (remote code execution) |
-| `mkfs*`, `newfs_*` | Filesystem formatting |
-| `wipefs` | Disk signature wipe |
-| `diskutil erase/zeroDisk/secureErase/reformat` | Destructive disk operation |
-| `dd of=/dev/…` | Raw disk write |
-| `parted`, `fdisk`, `gdisk`, `sgdisk` | Partition table management |
-| `cryptsetup` | Disk encryption management |
-| `zpool` | ZFS pool management |
-| `shutdown`, `reboot`, `halt`, `poweroff` | System power operation |
-| `terraform destroy` | Infrastructure teardown |
-| `kubectl delete` | Kubernetes resource deletion |
-| `aws s3 rm --recursive` | Bulk S3 deletion |
-| `git commit` | Main-session operation |
-| `git pull` | Main-session operation |
-| `git push` | Main-session operation |
-| `git reset --hard` | Discard all uncommitted changes |
-| `git clean -f` | Delete untracked files |
-| `git reflog expire` | Remove recovery history |
-| `git gc --prune` | Prune unreachable objects |
-
-All other commands (including routine git operations) pass through unaffected.
-
 ## Install
 
 Auto-discovered from `~/.pi/agent/extensions/bash-guard/`. Run `/reload` in pi.
@@ -66,5 +31,5 @@ Auto-discovered from `~/.pi/agent/extensions/bash-guard/`. Run `/reload` in pi.
 
 - Scope: `bash` tool calls only (`write`/`edit` and user `!` commands are not intercepted).
 - `--bash-guard-enabled`: main-session flag that starts bash-guard with interactive prompts enabled.
-- `--bash-guard-auto-allow`: main-session flag that allows flagged commands when there is no UI
-  (e.g. running pi non-interactively). Has no effect in subagent sessions.
+- `--bash-guard-auto-allow`: allows flagged commands when there is no UI
+  (e.g. running pi non-interactively).

@@ -1,9 +1,6 @@
 [submodule "git/github.com/code-yeongyu/pi-apply-patch"]
 	path = git/github.com/code-yeongyu/pi-apply-patch
 	url = https://github.com/code-yeongyu/pi-apply-patch.git
-[submodule "git/github.com/code-yeongyu/pi-nested-agents-md"]
-	path = git/github.com/code-yeongyu/pi-nested-agents-md
-	url = https://github.com/code-yeongyu/pi-nested-agents-md.git
 [submodule "git/github.com/code-yeongyu/pi-openai-web-search"]
 	path = git/github.com/code-yeongyu/pi-openai-web-search
 	url = https://github.com/code-yeongyu/pi-openai-web-search.git
