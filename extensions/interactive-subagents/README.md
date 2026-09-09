@@ -20,6 +20,17 @@ artifacts; the Pi subagent launch path does not invoke them.
 
 Spawn several in parallel — they run concurrently and steer results back independently as each finishes.
 
+To correct a running agent directly from the parent UI, use:
+
+```text
+/subagent-enter <name>
+```
+
+Pi opens an input prompt without leaving the parent session. The message is
+delivered through the native session's `steer()` API, so you can provide
+missing context, change the plan, or correct the agent's trajectory while it
+is running.
+
 Panes are kept evenly sized: the extension re-applies an `even-horizontal` layout after every spawn and exit (debounced). The layout is a single constant, `SUBAGENT_TMUX_LAYOUT` in `pi-extension/subagents/tmux.ts` — change it to any named tmux layout (`main-vertical`, `tiled`, …).
 
 If your shell startup is slow and launch commands get dropped before the prompt is ready, raise the delay:
