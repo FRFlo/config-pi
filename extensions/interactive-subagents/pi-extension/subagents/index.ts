@@ -1,3 +1,10 @@
+import {
+  AuthStorage,
+  createAgentSession,
+  createCodingTools,
+  ModelRegistry,
+  SessionManager,
+} from "@mariozechner/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { keyHint } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "@sinclair/typebox";
@@ -236,7 +243,10 @@ function getToolExtensionPath(tool: string): string | undefined {
   // when that path no longer exists on disk (e.g. a built-in tool extension
   // was disabled/removed but a project-local extension re-registered it).
   const builtin = map[tool];
-  if (builtin && existsSync(builtin)) return portablePath(builtin);
+  // Keep the stable extension path even when an optional extension is not
+  // installed in the current checkout. The child resource loader can report
+  // the missing extension; discovery must remain deterministic.
+  if (builtin) return portablePath(builtin);
   const extra = EXTRA_TOOL_EXTENSIONS.get(tool);
   return extra ? portablePath(extra) : undefined;
 }
@@ -635,6 +645,8 @@ interface RunningSubagent {
    * subagent's pane (e.g. planner).
    */
   interactive: boolean;
+  /** Native in-process AgentSession. Kept private to the native runner. */
+  nativeSession?: any;
 }
 
 /** All currently running subagents, keyed by id. */
@@ -1011,6 +1023,10 @@ function steerSubagent(
   send: (surface: string, command: string) => void = sendCommand,
 ): { ok: true } | { error: string } {
   const flattened = message.replace(/\s*\n\s*/g, " ").trim();
+  if (running.nativeSession) {
+    void running.nativeSession.steer(flattened);
+    return { ok: true };
+  }
   try {
     send(running.surface, flattened);
     return { ok: true };
@@ -1126,6 +1142,157 @@ function startStatusRefresh(pi: ExtensionAPI) {
 // waiting for the user, contradicting that result-delivery model.
 function resolveResumeLaunchBehavior(): { autoExit: boolean; interactive: boolean } {
   return { autoExit: true, interactive: false };
+}
+
+/**
+ * Run a child AgentSession in this Pi process.  This is deliberately separate
+ * from the legacy launcher below so the migration is easy to review and so
+ * old session metadata/helpers remain backwards compatible.
+ */
+async function createNativeSubagentSession(options: {
+  sessionFile: string;
+  sessionDir: string;
+  cwd: string;
+  agentDir: string;
+  model?: string;
+  thinking?: string;
+  tools?: string;
+  task: string;
+  identity?: string;
+  systemPromptMode?: "append" | "replace";
+  agentName: string;
+  name: string;
+}): Promise<any> {
+  const sessionManager = SessionManager.open(options.sessionFile, options.sessionDir);
+  const authStorage = AuthStorage.create(join(options.agentDir, "auth.json"));
+  const modelRegistry = ModelRegistry.create(authStorage, join(options.agentDir, "models.json"));
+
+  // The extension loader reads these while constructing the child runtime.
+  // Set them before createAgentSession, not after it.
+  const previousEnv = {
+    name: process.env.PI_SUBAGENT_NAME,
+    agent: process.env.PI_SUBAGENT_AGENT,
+    session: process.env.PI_SUBAGENT_SESSION,
+  };
+  process.env.PI_SUBAGENT_NAME = options.name;
+  process.env.PI_SUBAGENT_AGENT = options.agentName;
+  process.env.PI_SUBAGENT_SESSION = options.sessionFile;
+
+  let model: any;
+  if (options.model) {
+    const slash = options.model.indexOf("/");
+    const provider = slash > 0 ? options.model.slice(0, slash) : undefined;
+    const modelId = slash > 0 ? options.model.slice(slash + 1) : options.model;
+    if (provider) model = modelRegistry.find(provider, modelId);
+  }
+
+  const result = await createAgentSession({
+    cwd: options.cwd,
+    agentDir: options.agentDir,
+    authStorage,
+    modelRegistry,
+    sessionManager,
+    ...(model ? { model } : {}),
+    ...(options.thinking ? { thinkingLevel: options.thinking as any } : {}),
+    ...(options.tools
+      ? {
+          tools: createCodingTools(options.cwd).filter((tool: any) =>
+            options.tools!.split(",").filter(Boolean).includes(tool.name),
+          ),
+        }
+      : {}),
+    // The child extension reads these values for identity and ask_question.
+    sessionStartEvent: { type: "session_start", reason: "new" },
+  });
+  const session = result.session;
+  for (const [key, value] of Object.entries({
+    PI_SUBAGENT_NAME: previousEnv.name,
+    PI_SUBAGENT_AGENT: previousEnv.agent,
+    PI_SUBAGENT_SESSION: previousEnv.session,
+  })) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  if (options.identity) {
+    const identity = options.identity;
+    const current = session.agent.state.systemPrompt ?? "";
+    session.agent.state.systemPrompt = options.systemPromptMode === "replace"
+      ? identity
+      : `${current}\n\n${identity}`.trim();
+  }
+  // The SDK loads extension tools before applying its built-in tool list. Set
+  // the final active list explicitly so a native child cannot accidentally see
+  // every extension tool from the parent installation.
+  session.setActiveToolsByName(
+    options.tools
+      ? options.tools.split(",").map((name) => name.trim()).filter(Boolean)
+      : ["read", "bash", "edit", "write"],
+  );
+  return session;
+}
+
+async function launchNativeSubagent(
+  params: typeof SubagentParams.static,
+  ctx: { sessionManager: { getSessionFile(): string | null; getSessionId(): string; getSessionDir(): string }; cwd: string },
+): Promise<RunningSubagent> {
+  const startTime = Date.now();
+  const id = Math.random().toString(16).slice(2, 10);
+  const agentDefs = params.agent ? loadAgentDefaults(params.agent) : null;
+  if (agentDefs?.cli === "claude") throw new Error("Native subagents do not support cli: claude; use a Pi agent definition.");
+  const parentSessionFile = ctx.sessionManager.getSessionFile();
+  if (!parentSessionFile) throw new Error("No session file");
+  const { effectiveCwd, localAgentDir, effectiveAgentDir } = resolveSubagentPaths(params, agentDefs);
+  const targetCwd = effectiveCwd ?? ctx.cwd;
+  const sessionDir = getDefaultSessionDirFor(targetCwd, effectiveAgentDir);
+  const sessionFile = join(sessionDir, `${new Date().toISOString().replace(/[:.]/g, "-")}_${id}.jsonl`);
+  const behavior = resolveLaunchBehavior(params, agentDefs);
+  if (behavior.seededSessionMode) {
+    seedSubagentSessionFile({ mode: behavior.seededSessionMode, parentSessionFile, childSessionFile: sessionFile, childCwd: targetCwd });
+  }
+  const parentArtifactDir = getArtifactDir(ctx.sessionManager.getSessionDir(), ctx.sessionManager.getSessionId());
+  const activityFile = getSubagentActivityFile(parentArtifactDir, id);
+  mkdirSync(dirname(activityFile), { recursive: true });
+  const grantSpawning = !!agentDefs?.subagentAgents?.length;
+  const toolAllowlist = buildSubagentToolAllowlist(agentDefs?.tools, { grantSpawning });
+  const loadout: SubagentLoadout = {
+    agent: params.agent ?? null,
+    toolAllowlist,
+    model: params.model ?? agentDefs?.model ?? null,
+    thinking: agentDefs?.thinking ?? null,
+    systemPromptMode: agentDefs?.systemPromptMode ?? null,
+    identity: agentDefs?.body ?? null,
+    spawnable: agentDefs?.subagentAgents ?? null,
+    autoExit: agentDefs?.autoExit ?? false,
+    cwd: effectiveCwd,
+    agentDir: localAgentDir && existsSync(localAgentDir) ? localAgentDir : process.env.PI_CODING_AGENT_DIR ?? null,
+  };
+  writeSubagentLoadout(sessionFile, loadout);
+  const roleBlock = agentDefs?.body && !agentDefs.systemPromptMode ? `\n\n${agentDefs.body}` : "";
+  const task = behavior.inheritsConversationContext
+    ? params.task
+    : `${roleBlock}\n\n${params.task}\n\nYour final message should summarize what you accomplished.`;
+  const nativeSession = await createNativeSubagentSession({
+    sessionFile,
+    sessionDir,
+    cwd: targetCwd,
+    agentDir: loadout.agentDir ?? getAgentConfigDir(),
+    model: params.model ?? agentDefs?.model,
+    thinking: agentDefs?.thinking,
+    tools: toolAllowlist ?? undefined,
+    task,
+    identity: agentDefs?.systemPromptMode ? agentDefs.body : undefined,
+    systemPromptMode: agentDefs?.systemPromptMode,
+    agentName: params.agent ?? "",
+    name: params.name,
+  });
+  const running: RunningSubagent = {
+    id, name: params.name, task, agent: params.agent,
+    surface: `native:${id}`, startTime, sessionFile, activityFile,
+    nativeSession, interactive: resolveEffectiveInteractive(params, agentDefs),
+    statusState: createStatusState({ source: "pi", startTimeMs: startTime }),
+  };
+  runningSubagents.set(id, running);
+  return running;
 }
 
 export const __test__ = {
@@ -1533,6 +1700,39 @@ async function watchSubagent(
 ): Promise<SubagentResult> {
   const { name, task, surface, startTime, sessionFile } = running;
 
+  if (running.nativeSession) {
+    const nativeTick = setInterval(() => {
+      observeRunningSubagent(running);
+      deliverPendingQuestion(running);
+      updateWidget();
+    }, 250);
+    try {
+      await running.nativeSession.prompt(running.task);
+      if (signal.aborted) await running.nativeSession.abort();
+      const entries = existsSync(sessionFile) ? getNewEntries(sessionFile, 0) : [];
+      const summary = findLastAssistantMessage(entries) ?? "Sub-agent exited without output";
+      const stats = existsSync(sessionFile) ? summarizeSessionStats(sessionFile) : null;
+      const sessionId = existsSync(sessionFile) ? getSessionId(sessionFile) : null;
+      clearInterval(nativeTick);
+      running.nativeSession.dispose();
+      runningSubagents.delete(running.id);
+      return {
+        name, task, summary, sessionFile, ...(sessionId ? { sessionId } : {}),
+        exitCode: 0, elapsed: Math.floor((Date.now() - startTime) / 1000),
+        ...(stats ? { stats } : {}),
+      };
+    } catch (err: any) {
+      clearInterval(nativeTick);
+      try { running.nativeSession.dispose(); } catch {}
+      runningSubagents.delete(running.id);
+      return {
+        name, task, summary: `Subagent error: ${err?.message ?? String(err)}`,
+        sessionFile, exitCode: 1, elapsed: Math.floor((Date.now() - startTime) / 1000),
+        errorMessage: err?.message ?? String(err),
+      };
+    }
+  }
+
   try {
     const result = await pollForExit(surface, AbortSignal.any([signal, getModuleAbortSignal()]), {
       interval: 1000,
@@ -1764,12 +1964,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           };
         }
 
-        // Validate prerequisites (need mux + a session file to derive the
-        // artifact dir that hosts this session's name registry).
-        if (!isMuxAvailable()) {
-          return muxUnavailableResult();
-        }
-
         if (!ctx.sessionManager.getSessionFile()) {
           return {
             content: [
@@ -1807,7 +2001,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         // from then on uniqueRunningName tracks it via the running map.
         let running;
         try {
-          running = await launchSubagent(params, ctx);
+          // Native in-process sessions are the default. No terminal
+          // multiplexer or child CLI is required.
+          running = await launchNativeSubagent(params, ctx);
         } finally {
           if (reservedName) reservedNames.delete(reservedName);
         }
@@ -2084,10 +2280,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
           return { content: [{ type: "text" as const, text: err }], details: { error: err } };
         }
 
-        if (!isMuxAvailable()) {
-          return muxUnavailableResult();
-        }
-
         // ── Steer a running subagent ──
         // A name that matches a currently-running subagent always steers it.
         const runningMatch = Array.from(runningSubagents.values()).find((r) => r.name === requestedName);
@@ -2149,6 +2341,48 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         }
 
         const resumedSessionId = entry.sessionId ?? getSessionId(sessionPath) ?? requestedName;
+
+        // Resume directly in this process. The old pane-based implementation
+        // below is retained only as historical reference during this migration.
+        const nativeSession = await createNativeSubagentSession({
+          sessionFile: sessionPath,
+          sessionDir: dirname(sessionPath),
+          cwd: loadout.cwd ?? ctx.cwd,
+          agentDir: loadout.agentDir ?? getAgentConfigDir(),
+          model: loadout.model ?? undefined,
+          thinking: loadout.thinking ?? undefined,
+          tools: loadout.toolAllowlist ?? undefined,
+          task: message,
+          identity: loadout.identity ?? undefined,
+          systemPromptMode: loadout.systemPromptMode ?? undefined,
+          agentName: loadout.agent ?? "",
+          name,
+        });
+        const nativeRunning: RunningSubagent = {
+          id, name, task: message, surface: `native:${id}`, startTime,
+          sessionFile: sessionPath, nativeSession, interactive,
+          statusState: createStatusState({ source: "pi", startTimeMs: startTime }),
+        };
+        runningSubagents.set(id, nativeRunning);
+        startWidgetRefresh();
+        startStatusRefresh(pi);
+        const nativeAbort = new AbortController();
+        nativeRunning.abortController = nativeAbort;
+        watchSubagent(nativeRunning, nativeAbort.signal).then((result) => {
+          updateWidget();
+          const presentation = resolveResultPresentation({ ...result, sessionFile: sessionPath, sessionId: resumedSessionId }, name);
+          pi.sendMessage({
+            customType: "subagent_result", content: presentation, display: true,
+            details: { name, task: message, exitCode: result.exitCode, elapsed: result.elapsed, sessionFile: sessionPath, sessionId: resumedSessionId },
+          }, { triggerTurn: true, deliverAs: "steer" });
+        }).catch((err) => pi.sendMessage({
+          customType: "subagent_result", content: `Resume error: ${err?.message ?? String(err)}`, display: true,
+          details: { name, error: err?.message },
+        }, { triggerTurn: true, deliverAs: "steer" }));
+        return {
+          content: [{ type: "text", text: `Session "${name}" resumed natively.` }],
+          details: { id, name, sessionId: resumedSessionId, sessionFile: sessionPath, status: "started" },
+        };
 
         // Record entry count before resuming so we can extract new messages.
         // Count lines cheaply (no per-line JSON.parse) so resuming a large
