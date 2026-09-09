@@ -183,6 +183,12 @@ function portablePath(path: string): string {
   return path.replace(/\\/g, "/");
 }
 
+/** MCP tools belong to the session that activated their server. */
+function isMcpTool(name: string, extensionPath?: string): boolean {
+  const normalized = `${name} ${extensionPath ?? ""}`.toLowerCase();
+  return name.startsWith("mcp__") || normalized.includes("/mcp/") || normalized.includes("\\mcp\\");
+}
+
 // ── Runtime tool-extension registration ─────────────────────────────────────
 // `getToolExtensionPath` otherwise only knows a closed set of tool names. Other
 // pi extensions that bundle a tool for subagents (e.g. a project-local
@@ -1174,6 +1180,19 @@ async function createNativeSubagentSession(options: {
       join(SUBAGENTS_DIR, "index.ts"),
       join(SUBAGENTS_DIR, "subagent-done.ts"),
       join(SUBAGENTS_DIR, "../../../ask-user-question.ts"),
+      ...[
+        "web-search/index.ts",
+        "web-fetch/index.ts",
+        "video-extract/index.ts",
+        "youtube-search/index.ts",
+        "google-image-search/index.ts",
+      ]
+        .map((relativePath) => join(options.agentDir, "extensions", relativePath))
+        .filter((extensionPath) => existsSync(extensionPath)),
+      ...Array.from(EXTRA_TOOL_EXTENSIONS.entries())
+        .filter(([name, extensionPath]) => !isMcpTool(name, extensionPath))
+        .map(([, extensionPath]) => extensionPath)
+        .filter((extensionPath) => existsSync(extensionPath)),
     ],
   });
   await resourceLoader.reload();
@@ -1195,13 +1214,7 @@ async function createNativeSubagentSession(options: {
     sessionManager,
     resourceLoader,
     ...(options.thinking ? { thinkingLevel: options.thinking as any } : {}),
-    ...(options.tools
-      ? {
-          tools: createCodingTools(options.cwd).filter((tool: any) =>
-            options.tools!.split(",").filter(Boolean).includes(tool.name),
-          ),
-        }
-      : {}),
+    tools: createCodingTools(options.cwd),
     // The child extension reads these values for identity and ask_question.
     sessionStartEvent: { type: "session_start", reason: "new" },
   });
@@ -1224,11 +1237,7 @@ async function createNativeSubagentSession(options: {
   // The SDK loads extension tools before applying its built-in tool list. Set
   // the final active list explicitly so a native child cannot accidentally see
   // every extension tool from the parent installation.
-  session.setActiveToolsByName(
-    options.tools
-      ? options.tools.split(",").map((name) => name.trim()).filter(Boolean)
-      : ["read", "bash", "edit", "write"],
-  );
+  session.setActiveToolsByName(session.getAllTools().map((tool: any) => tool.name));
   return session;
 }
 

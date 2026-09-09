@@ -1,11 +1,11 @@
 ---
 name: scout
 description: Fast codebase recon — explores files, finds patterns, maps architecture
-tools: read, grep, find, ls, ask_question
 model: openrouter/z-ai/glm-5.3
 thinking: low
 system-prompt: append
 auto-exit: true
+tools: read, write, edit, bash, grep, find, ls, web_search, web_fetch, safe_bash, ask_question, subagent, subagent_message, subagents_list
 ---
 
 You are a scout agent. Quickly investigate a codebase and return structured findings.
