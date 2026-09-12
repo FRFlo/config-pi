@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "servers": [
+    {
+      "id": "bun-typescript",
+      "enabled": true,
+      "include": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.mts", "**/*.cts", "**/*.mjs", "**/*.cjs"],
+      "rootMarkers": ["bun.lock", "bunfig.toml", "package.json", "tsconfig.json"],
+      "bin": "bun",
+      "args": ["x", "typescript-language-server", "--stdio"],
+      "cwd": "{root}",
+      "languageIdByExtension": {
+        ".ts": "typescript",
+        ".tsx": "typescriptreact",
+        ".js": "javascript",
+        ".jsx": "javascriptreact",
+        ".mts": "typescript",
+        ".cts": "typescript",
+        ".mjs": "javascript",
+        ".cjs": "javascript"
+      },
+      "startupTimeoutMs": 45000,
+      "diagnosticsWaitMs": 1500,
+      "initializationOptions": {},
+      "settings": {}
+    },
+    {
+      "id": "python-pyright",
+      "enabled": true,
+      "include": ["**/*.py", "**/*.pyi"],
+      "rootMarkers": ["pyproject.toml", "setup.py", "requirements.txt", "pyrightconfig.json"],
+      "bin": "bun",
+      "args": ["x", "pyright-langserver", "--stdio"],
+      "cwd": "{root}",
+      "languageIdByExtension": {
+        ".py": "python",
+        ".pyi": "python"
+      },
+      "startupTimeoutMs": 45000,
+      "diagnosticsWaitMs": 2000,
+      "initializationOptions": {},
+      "settings": {}
+    },
+    {
+      "id": "gopls",
+      "enabled": true,
+      "include": ["**/*.go"],
+      "rootMarkers": ["go.mod", "go.work"],
+      "bin": "gopls",
+      "args": [],
+      "cwd": "{root}",
+      "languageIdByExtension": { ".go": "go" },
+      "startupTimeoutMs": 45000,
+      "diagnosticsWaitMs": 1500,
+      "initializationOptions": {},
+      "settings": {}
+    },
+    {
+      "id": "csharp-ls",
+      "enabled": true,
+      "include": ["**/*.cs"],
+      "rootMarkers": ["*.sln", "*.slnx", "*.csproj", "global.json"],
+      "bin": "%USERPROFILE%/.dotnet/tools/csharp-ls.exe",
+      "args": [],
+      "cwd": "{root}",
+      "languageIdByExtension": { ".cs": "csharp" },
+      "startupTimeoutMs": 60000,
+      "diagnosticsWaitMs": 2000,
+      "initializationOptions": {},
+      "settings": {}
+    }
+  ]
+}

@@ -10,7 +10,9 @@
     "git:github.com/code-yeongyu/pi-todotools",
     "git:github.com/code-yeongyu/pi-openai-web-search",
     "git:github.com/FRFlo/pi-quotas",
-    "npm:pi-antigravity"
+    "npm:pi-antigravity",
+    "git:github.com/FRFlo/pi-interactive-subagents",
+    "npm:pi-lsp"
   ],
   "observational-memory": {
     "backend": "sqlite",
