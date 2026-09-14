@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DynamicBorder, isToolCallEventType } from "@mariozechner/pi-coding-agent";
 import type { SelectItem } from "@mariozechner/pi-tui";
 import { Container, SelectList, Text } from "@mariozechner/pi-tui";
+import { hermesSelect, isHermesRpc } from "../hermes-rpc";
 import { parse as shellParse } from "shell-quote";
 
 type Severity = "high" | "medium";
@@ -317,6 +318,16 @@ async function promptRunOrAbort(ctx: any, command: string, risk: Risk): Promise<
 		{ value: "run", label: "Run", description: "Execute the command" },
 		{ value: "abort", label: "Abort", description: "Block this command" },
 	];
+
+	if (isHermesRpc(ctx)) {
+		const selected = await hermesSelect(
+			ctx,
+			`${header}\n\n${reasonsText}\n\nCommand:\n${command}`,
+			items.map((item) => `${item.label} — ${item.description}`),
+			ctx.signal,
+		);
+		return selected?.startsWith("Run") ? "run" : "abort";
+	}
 
 	const choice = await ctx.ui.custom<"run" | "abort">((tui, theme, _kb, done) => {
 		const container = new Container();

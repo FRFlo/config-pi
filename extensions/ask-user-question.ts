@@ -15,6 +15,7 @@ import {
 	loadDiscordBridgeConfig,
 	resolveDiscordQuestion,
 } from "./discord-bridge";
+import { hermesInput, hermesSelect, isHermesRpc } from "./hermes-rpc";
 
 interface AskOption {
 	label: string;
@@ -234,6 +235,68 @@ function buildResult(
 		content: [{ type: "text" as const, text: formatAnswersForContent(answers) }],
 		details: buildStructuredResult("answered", question, mode, answers, context),
 	};
+}
+
+function rpcQuestionTitle(question: string, details: string | undefined, context: string | undefined): string {
+	return [question, details, context ? `Context: ${context}` : undefined].filter(Boolean).join("\n\n");
+}
+
+function rpcOptionLabel(option: AskOption): string {
+	return option.description ? `${option.label} — ${option.description}` : option.label;
+}
+
+/** Use only Pi's serializable dialog primitives when running headlessly. */
+async function askRpcMode(
+	ctx: any,
+	question: string,
+	details: string | undefined,
+	context: string | undefined,
+	mode: AskUserQuestionMode,
+	options: AskOption[],
+	signal?: AbortSignal,
+): Promise<AskAnswer[] | null> {
+	const title = rpcQuestionTitle(question, details, context);
+	if (mode === "text") {
+		const value = await hermesInput(ctx, title, "Enter your answer", signal);
+		const trimmed = value?.trim() || "";
+		return trimmed ? [{ type: "text", label: trimmed, value: trimmed }] : null;
+	}
+
+	if (mode === "single-select") {
+		const otherLabel = getOtherLabel(options);
+		const selected = await hermesSelect(ctx, title, [...options.map(rpcOptionLabel), otherLabel], signal);
+		if (selected === undefined) return null;
+		const other = selected === otherLabel;
+		if (other) {
+			const value = (await hermesInput(ctx, `${title}\n\nCustom answer`, "Enter your answer", signal))?.trim() || "";
+			return value ? [{ type: "other", label: value, value }] : null;
+		}
+		const index = options.map(rpcOptionLabel).indexOf(selected);
+		const option = options[index];
+		return option ? [{ type: "option", label: option.label, value: option.value, index: index + 1 }] : null;
+	}
+
+	const remaining = [...options];
+	const answers: AskAnswer[] = [];
+	while (true) {
+		const selected = await hermesSelect(
+			ctx,
+			`${title}\n\nSelected: ${answers.map((answer) => answer.label).join(", ") || "none"}`,
+			[...remaining.map(rpcOptionLabel), getOtherLabel(remaining), "Submit selection"],
+			signal,
+		);
+		if (selected === undefined || selected === "Submit selection") break;
+		const otherLabel = getOtherLabel(remaining);
+		if (selected === otherLabel) {
+			const value = (await hermesInput(ctx, `${title}\n\nCustom answer`, "Enter your answer", signal))?.trim() || "";
+			if (value) answers.push({ type: "other", label: value, value });
+			continue;
+		}
+		const index = remaining.map(rpcOptionLabel).indexOf(selected);
+		const option = index >= 0 ? remaining.splice(index, 1)[0] : undefined;
+		if (option) answers.push({ type: "option", label: option.label, value: option.value, index: options.indexOf(option) + 1 });
+	}
+	return answers;
 }
 
 async function askTextMode(
@@ -1046,6 +1109,11 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 
 			if (!ctx.hasUI) {
 				return unavailableResult(params.question, mode, "ask_user_question requires interactive mode UI", context);
+			}
+
+			if (isHermesRpc(ctx)) {
+				const answers = await askRpcMode(ctx, params.question, details, context, mode, options, signal);
+				return answers ? buildResult(params.question, context, mode, answers) : cancelledResult(params.question, mode, context);
 			}
 
 			return withUILock(async () => {
