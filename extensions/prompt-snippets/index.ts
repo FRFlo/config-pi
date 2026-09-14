@@ -20,6 +20,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { isHermesRpc } from "../hermes-rpc.ts";
 
 interface Snippet {
 	/** Filename, e.g. "concise.md" */
@@ -107,7 +108,63 @@ export default function (pi: ExtensionAPI) {
 		ctx.ui.setWidget(WIDGET_ID, lines);
 	}
 
+	async function openRpcMenu(ctx: ExtensionContext) {
+		snippets = loadSnippets();
+		enabled = new Set([...enabled].filter((id) => snippets.some((s) => s.id === id)));
+
+		if (snippets.length === 0) {
+			ctx.ui.notify(`No snippets found in ${snippetsDir}`, "warning");
+			return;
+		}
+
+		const working = new Set(enabled);
+		const items = snippets.map((snippet) => {
+			const marker = working.has(snippet.id) ? "[x]" : "[ ]";
+			const placement = snippet.placement === "prepend" ? "prepend" : "append";
+			const description = snippet.description ? ` — ${snippet.description}` : "";
+			return `${marker} ${snippet.name} (${placement})${description}`;
+		});
+
+		while (true) {
+			const selected = await ctx.ui.select(
+				"Prompt snippets — select a snippet to toggle, then Apply",
+				[...items.map((label, index) => {
+					const snippet = snippets[index];
+					const marker = working.has(snippet.id) ? "[x]" : "[ ]";
+					return `${marker} ${label.slice(4)}`;
+				}), "Apply", "Cancel"],
+			);
+			if (!selected || selected === "Cancel") return;
+			if (selected === "Apply") {
+				enabled = working;
+				updateWidget(ctx);
+				ctx.ui.notify(
+					enabled.size > 0
+						? `Active snippets: ${snippets.filter((s) => enabled.has(s.id)).map((s) => s.name).join(", ")}`
+						: "No active snippets",
+					"info",
+				);
+				return;
+			}
+
+			const selectedIndex = [...items.map((label, index) => {
+				const snippet = snippets[index];
+				const marker = working.has(snippet.id) ? "[x]" : "[ ]";
+				return `${marker} ${label.slice(4)}`;
+			})].indexOf(selected);
+			if (selectedIndex >= 0) {
+				const snippet = snippets[selectedIndex];
+				if (working.has(snippet.id)) working.delete(snippet.id);
+				else working.add(snippet.id);
+			}
+		}
+	}
+
 	async function openMenu(ctx: ExtensionContext) {
+		if (isHermesRpc(ctx)) {
+			await openRpcMenu(ctx);
+			return;
+		}
 		if (ctx.mode !== "tui") {
 			ctx.ui.notify("Snippet menu requires interactive mode", "warning");
 			return;
