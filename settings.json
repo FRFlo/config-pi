@@ -11,6 +11,7 @@
     "git:github.com/code-yeongyu/pi-openai-web-search",
     "git:github.com/FRFlo/pi-quotas",
     "npm:pi-antigravity",
+    "npm:@posthog/pi",
     "git:github.com/FRFlo/pi-interactive-subagents",
     "npm:pi-lsp"
   ],

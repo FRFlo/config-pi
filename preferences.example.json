@@ -13,6 +13,11 @@
   "mcp": {
     "context7ApiKey": "your-context7-api-key-here"
   },
+  "posthog": {
+    "apiKey": "phc_your-project-api-key-here",
+    "host": "https://eu.i.posthog.com",
+    "mcpEnabled": false
+  },
   "observational-memory": {
     "backend": "sqlite",
     "models": {

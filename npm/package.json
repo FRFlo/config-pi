@@ -5,10 +5,11 @@
     "postinstall": "node ../scripts/patch-pi-tui.js"
   },
   "dependencies": {
+    "@posthog/pi": "^0.3.0",
     "@xterm/headless": "^6.0.0",
-    "pi-antigravity": "^0.7.2",
+    "pi-antigravity": "^0.7.3",
     "pi-lsp": "^0.1.7",
-    "pi-mcp-adapter": "^2.32.1",
+    "pi-mcp-adapter": "^2.34.0",
     "typebox": "npm:@sinclair/typebox@^0.34.52"
   }
 }
