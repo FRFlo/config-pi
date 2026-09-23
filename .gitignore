@@ -18,6 +18,7 @@ run-history.jsonl
 session-manager-config.toml
 pi-crash.log
 observational-memory.sqlite
+crashes.json
 
 # Dependencies / generated environments
 node_modules/
@@ -35,8 +36,7 @@ __pycache__/
 Thumbs.db
 tmp/
 *.log
-bin/fd.exe
-bin/rg.exe
+bin/
 .profile/
 **/.profile/
 .gitnexus
