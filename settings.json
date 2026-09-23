@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.85.1",
+  "lastChangelogVersion": "0.87.0",
   "theme": "dark",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.6-luna",
@@ -7,7 +7,7 @@
     "npm:pi-mcp-adapter",
     "git:github.com/FRFlo/pi-web-search",
     "git:github.com/code-yeongyu/pi-apply-patch",
-    "git:github.com/code-yeongyu/pi-todotools",
+    "git:github.com/FRFlo/pi-todotools",
     "git:github.com/code-yeongyu/pi-openai-web-search",
     "git:github.com/FRFlo/pi-quotas",
     "npm:pi-antigravity",
@@ -28,5 +28,5 @@
       }
     }
   },
-  "hideThinkingBlock": false
+  "hideThinkingBlock": true
 }
