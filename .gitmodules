@@ -11,6 +11,6 @@
 	path = git/github.com/FRFlo/pi-quotas
 	url = https://github.com/FRFlo/pi-quotas.git
 	branch = main
-[submodule "git/github.com/FRFlo/pi-todotools"]
-	path = git/github.com/FRFlo/pi-todotools
-	url = https://github.com/FRFlo/pi-todotools.git
+[submodule "git/github.com/code-yeongyu/pi-todotools"]
+	path = git/github.com/code-yeongyu/pi-todotools
+	url = https://github.com/code-yeongyu/pi-todotools.git
