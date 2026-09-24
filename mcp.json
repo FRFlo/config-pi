@@ -40,6 +40,13 @@
     },
     "posthog": {
       "url": "https://mcp.posthog.com/mcp"
+    },
+    "lugo": {
+      "command": "./bin/lugo-mcp.exe",
+      "args": [
+        "."
+      ],
+      "cwd": "."
     }
   }
 }

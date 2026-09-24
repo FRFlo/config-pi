@@ -2,6 +2,31 @@
   "version": 1,
   "servers": [
     {
+      "id": "lugo-lua",
+      "enabled": true,
+      "include": ["**/*.lua"],
+      "rootMarkers": ["fxmanifest.lua", "__resource.lua", ".luarc.json", ".git"],
+      "bin": "./bin/lugo.exe",
+      "args": [],
+      "cwd": "{root}",
+      "languageIdByExtension": { ".lua": "lua" },
+      "startupTimeoutMs": 60000,
+      "diagnosticsWaitMs": 1500,
+      "initializationOptions": {
+        "diagFiveMEventDirection": true,
+        "diagFiveMEventPayload": true,
+        "diagFiveMUnregisteredNetEvent": true,
+        "diagFiveMUnknownEvent": true,
+        "diagFiveMUnaccountedFile": true,
+        "diagFiveMUnknownExport": true,
+        "diagFiveMUnknownResource": true,
+        "diagFiveMTrustBoundary": true,
+        "diagFiveMPerformance": true,
+        "diagFiveMSQL": true
+      },
+      "settings": {}
+    },
+    {
       "id": "bun-typescript",
       "enabled": true,
       "include": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.mts", "**/*.cts", "**/*.mjs", "**/*.cjs"],
@@ -60,11 +85,25 @@
       "enabled": true,
       "include": ["**/*.cs"],
       "rootMarkers": ["*.sln", "*.slnx", "*.csproj", "global.json"],
-      "bin": "%USERPROFILE%/.dotnet/tools/csharp-ls.exe",
+      "bin": "~/.dotnet/tools/csharp-ls.exe",
       "args": [],
       "cwd": "{root}",
       "languageIdByExtension": { ".cs": "csharp" },
       "startupTimeoutMs": 60000,
+      "diagnosticsWaitMs": 2000,
+      "initializationOptions": {},
+      "settings": {}
+    },
+    {
+      "id": "jdtls",
+      "enabled": true,
+      "include": ["**/*.java"],
+      "rootMarkers": ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", ".project", ".git"],
+      "bin": "~/AppData/Roaming/npm/jdtls",
+      "args": [],
+      "cwd": "{root}",
+      "languageIdByExtension": { ".java": "java" },
+      "startupTimeoutMs": 90000,
       "diagnosticsWaitMs": 2000,
       "initializationOptions": {},
       "settings": {}
