@@ -76,7 +76,9 @@ function listFilesRecursive(dir: string): string[] {
 /** Register the consolidator's scoped file tools (read/write/edit/ls/grep), all under .memory/. */
 export function registerConsolidatorTools(pi: ExtensionAPI, memoryRoot: string): void {
 	const root = resolve(memoryRoot);
-	const sqlite = process.env.OM_MEMORY_BACKEND === "sqlite";
+	// Durable memory is always SQLite. The filesystem imports above are retained
+	// only for the scoped path checks and legacy migration compatibility.
+	const sqlite = true;
 
 	pi.registerTool({
 		name: "read",

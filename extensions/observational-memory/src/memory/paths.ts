@@ -1,14 +1,8 @@
 /**
- * `.memory/` substrate (Phase B). The filesystem IS the long-term recall interface: the master
- * reads topic files with ordinary `ls`/`read`/`grep`. Topic files are NOT rolled back by `/tree`
- * (they track the repo, not the session branch).
+ * SQLite-backed memory substrate (Phase B). The filesystem path is retained only as a
+ * virtual sandbox for worker tools; durable topics and journey are stored in SQLite.
  *
- * Layout under <project>/.memory/:
- *   INDEX.md            — orchestrator-owned; (re)rendered from topic front-matter
- *   <topic>.md          — consolidator-authored; YAML front-matter + current-state prose
- *   .runs/<id>.json     — transient worker IPC (not GC'd in v1)
- *
- * All writes are atomic (temp + rename) so a reader never sees a half-written file.
+ * No memory files are written by the extension.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";

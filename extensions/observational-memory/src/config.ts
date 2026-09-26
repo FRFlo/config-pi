@@ -9,7 +9,7 @@ export interface ConfiguredModel {
 	thinking?: ModelThinkingLevel;
 }
 
-export type MemoryBackend = "files" | "sqlite";
+export type MemoryBackend = "sqlite";
 
 export interface Config {
 	/** Raw-history token size of one observation chunk (fixed boundary). */
@@ -46,7 +46,7 @@ export interface Config {
 	passive: boolean;
 	/** Emit the NDJSON debug log. */
 	debugLog: boolean;
-	/** Durable memory + worker IPC backend. */
+	/** Durable memory + worker IPC backend (SQLite only). */
 	backend: MemoryBackend;
 }
 
@@ -83,7 +83,7 @@ function isThinkingLevel(value: unknown): value is ModelThinkingLevel {
 }
 
 function isMemoryBackend(value: unknown): value is MemoryBackend {
-	return value === "files" || value === "sqlite";
+	return value === "sqlite";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

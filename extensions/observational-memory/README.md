@@ -25,7 +25,7 @@ flowchart LR
     D["master ledger<br/><i>branch-local, /tree-correct</i>"]
     E["compaction block<br/><i>deterministic, model-free</i>"]
     F["consolidator<br/><i>subprocess pi, one at a time</i>"]
-    G[".memory/&lt;session&gt;/&lt;topic&gt;.md + INDEX.md<br/><i>durable, per-session, grep-able;<br/>tombstones drain buffer</i>"]
+    G["SQLite database<br/><i>durable, per-session;<br/>tombstones drain buffer</i>"]
 
     A --> B --> C --> D --> E
     D -- "oldest overflow<br/>(pool > consolidateAtPoolTokens)" --> F --> G
@@ -110,7 +110,7 @@ Namespace `observational-memory` in `~/.pi/agent/settings.json` (global) or
     "tailTokens": 20000,                 // verbatim tail; snaps to a chunk boundary
     "journeyTargetTokens": 1000,         // pushed JOURNEY.md size; compress oldest segments past this
     "observerConcurrency": 4,
-    "backend": "sqlite",                // "sqlite" (default) or legacy "files"
+    "backend": "sqlite",               // SQLite only
     "models": {
       "observer":     { "provider": "anthropic", "id": "claude-sonnet-4-6", "thinking": "low" },
       "consolidator": { "provider": "anthropic", "id": "claude-sonnet-4-6", "thinking": "medium" }
@@ -124,14 +124,10 @@ Namespace `observational-memory` in `~/.pi/agent/settings.json` (global) or
 `PI_OM_PASSIVE=1` forces `passive` (disables all triggers) for clean `/tree` testing.
 `passive` is a power-user setting distinct from the on/off gate.
 
-With the default SQLite backend, durable topics, JOURNEY, and worker IPC live in one device-local
-database under `~/.pi/agent/observational-memory.sqlite`, with explicit `(project_root,
-session_id)` scope columns. Existing Markdown topic/JOURNEY files are imported on first SQLite
-open; set `backend: "files"` to keep the previous file-per-topic behavior.
-
-For git/review, OM also writes one generated Markdown mirror at `.memory/MEMORY.md` when there is
-actual durable knowledge. This coarse-grained export contains JOURNEY plus all durable topic
-knowledge; commit that file if you want project-local memory history in git.
+Durable topics, JOURNEY, and worker IPC live exclusively in one device-local database under
+`~/.pi/agent/observational-memory.sqlite`, with explicit `(project_root, session_id)` scope
+columns. Existing Markdown topic/JOURNEY files are imported once for migration, but the extension
+does not create or update memory Markdown files.
 
 ## Development
 
@@ -143,7 +139,7 @@ npm run typecheck # tsc --noEmit
 
 Layout: `src/` is the master-side orchestrator (entry `src/index.ts`); `agent/` is the shared
 worker extension loaded into subprocesses via `-e` (`OM_WORKER=observer|consolidator`).
-Long-term memory lives under `<project>/.memory/<sessionId>/` (`INDEX.md` + `<topic>.md` +
-`JOURNEY.md`), keyed by the immutable session-header id so sessions in the same project stay
-isolated; a fork seeds its dir from the parent's on first touch. Transient worker IPC lives
-under `<project>/.memory/<sessionId>/.runs/`.
+Long-term memory and transient worker IPC are stored in SQLite, keyed by the immutable
+session-header id so sessions in the same project stay isolated; a fork clones its rows from the
+parent on first touch. A temporary `.memory/<sessionId>/` directory is used only as the worker
+sandbox and contains no durable memory files.

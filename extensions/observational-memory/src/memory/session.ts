@@ -15,6 +15,7 @@
 import { cpSync, existsSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { basename, sep } from "node:path";
 import { sessionMemoryRoot } from "./paths.js";
+import { sqliteCloneScope, sqliteHasScope } from "./sqlite.js";
 
 type SessionCtx = {
 	cwd: string;
@@ -46,7 +47,7 @@ function parentMemoryRoot(ctx: SessionCtx): string | undefined {
 	const parentId = readSessionHeaderId(parentFile);
 	if (!parentId) return undefined;
 	const root = sessionMemoryRoot(ctx.cwd, parentId);
-	return existsSync(root) ? root : undefined;
+	return existsSync(root) || sqliteHasScope(root) ? root : undefined;
 }
 
 /** True for any path inside a `.runs` directory (transient IPC; never seeded). */
@@ -67,6 +68,10 @@ export function ensureSessionMemory(ctx: SessionCtx): string {
 
 	const parent = parentMemoryRoot(ctx);
 	if (parent) {
+		if (sqliteHasScope(parent)) {
+			sqliteCloneScope(parent, root);
+			return root;
+		}
 		// Copy parent memory (minus transient .runs/) via temp+rename so a concurrent reader never
 		// observes a half-seeded directory.
 		const tmp = `${root}.seed-tmp-${process.pid}-${Date.now()}`;

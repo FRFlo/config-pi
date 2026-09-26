@@ -196,6 +196,27 @@ export function initSqliteMemory(root: string): void {
 	close(root, () => undefined);
 }
 
+/** Clone durable memory from a parent session into a forked session. */
+export function sqliteCloneScope(parentRoot: string, childRoot: string): void {
+	const parent = scopeFromRoot(parentRoot);
+	const child = scopeFromRoot(childRoot);
+	close(childRoot, (db) => {
+		db.exec("BEGIN");
+		try {
+			db.prepare("INSERT OR IGNORE INTO topics SELECT ?, ?, filename, id, title, summary, updated, content, updated_at FROM topics WHERE project_root=? AND session_id=?").run(
+				child.projectRoot, parent.projectRoot, parent.sessionId,
+			);
+			db.prepare("INSERT OR IGNORE INTO journey SELECT ?, ?, body, updated_at FROM journey WHERE project_root=? AND session_id=?").run(
+				child.projectRoot, child.sessionId, parent.projectRoot, parent.sessionId,
+			);
+			db.exec("COMMIT");
+		} catch (error) {
+			db.exec("ROLLBACK");
+			throw error;
+		}
+	});
+}
+
 export function writeSqliteRunResult(root: string, runId: string, role: string, result: unknown): void {
 	close(root, (db, s) => {
 		db.prepare(`INSERT INTO worker_runs(project_root, session_id, run_id, role, result_json, created_at, finished_at)

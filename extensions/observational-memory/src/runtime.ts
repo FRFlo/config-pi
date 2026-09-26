@@ -1,7 +1,7 @@
 import { type Config, DEFAULTS, loadConfig } from "./config.js";
 import { foldLedger, poolTokens, rawTokensSinceObservationCoverage, sumSessionCost, type Entry } from "./ledger/index.js";
 import { initSqliteMemory } from "./memory/sqlite.js";
-import { writeMemorySnapshot } from "./memory/snapshot.js";
+import { mkdirSync } from "node:fs";
 import { StatusController } from "./ui/status-controller.js";
 
 /**
@@ -115,8 +115,10 @@ export class Runtime {
 
 	ensureBackend(): void {
 		if (!this.enabled || !this.memoryRoot) return;
-		if (this.config.backend === "sqlite") initSqliteMemory(this.memoryRoot);
-		writeMemorySnapshot(this.memoryRoot);
+		// The memory root is only a subprocess sandbox. Durable memory and worker
+		// handoff data live exclusively in the SQLite database.
+		mkdirSync(this.memoryRoot, { recursive: true });
+		initSqliteMemory(this.memoryRoot);
 	}
 
 	/** Recompute the live footer gauges (next-observer + pool + context) from the current branch. */

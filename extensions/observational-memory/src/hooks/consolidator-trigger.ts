@@ -29,8 +29,7 @@ import {
 } from "../ledger/index.js";
 import { nowTimestamp } from "../ledger/serialize.js";
 import { renderIndexFile } from "../memory/index-render.js";
-import { atomicWrite, indexPath, listTopics, readJourney } from "../memory/paths.js";
-import { writeMemorySnapshot } from "../memory/snapshot.js";
+import { listTopics, readJourney } from "../memory/paths.js";
 import type { Runtime } from "../runtime.js";
 import { buildWorkerArgv, buildWorkerEnv, spawnWorker } from "../spawn/launch.js";
 import { recordWorkerCost } from "./observer-trigger.js";
@@ -138,13 +137,6 @@ async function dispatchConsolidator(
 				pi.appendEntry(OM_OBSERVATIONS_DROPPED, { observationTimestamps: toDrop, coversUpToId });
 			}
 		}
-
-		// Re-render INDEX.md for the file backend so live ls/grep truth leads the pushed map.
-		// SQLite renders the map directly from tables and does not need a generated index file.
-		if (runtime.config.backend === "files") {
-			atomicWrite(indexPath(runtime.memoryRoot), renderIndexFile(listTopics(runtime.memoryRoot)));
-		}
-		writeMemorySnapshot(runtime.memoryRoot);
 
 		runtime.status.workerDone(runId, toDrop.length);
 		runtime.refreshFooterGauges(ctx.sessionManager.getBranch(), ctx.getContextUsage?.()?.tokens ?? null);

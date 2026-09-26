@@ -141,6 +141,7 @@ export function buildWorkerEnv(role: "observer" | "consolidator", opts: Observer
 		OM_COST_PATH: runCostPath(opts.memoryRoot, opts.runId),
 		// Sandbox root for the consolidator's scoped file tools (design risk 6).
 		OM_MEMORY_DIR: opts.memoryRoot,
-		OM_MEMORY_BACKEND: opts.backend ?? "files",
+		// Kept as an explicit flag for worker extensions; SQLite is the only backend.
+		OM_MEMORY_BACKEND: "sqlite",
 	};
 }
