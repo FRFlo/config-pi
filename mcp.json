@@ -47,6 +47,16 @@
         "."
       ],
       "cwd": "."
+    },
+    "firefox-devtools": {
+      "command": "bunx",
+      "args": [
+        "-y",
+        "@mozilla/firefox-devtools-mcp@latest",
+        "--firefoxPath",
+        "C:\\Program Files\\Zen Browser\\zen.exe",
+        "--autoProfile"
+      ]
     }
   }
 }
