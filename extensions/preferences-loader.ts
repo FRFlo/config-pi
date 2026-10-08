@@ -116,10 +116,34 @@ export function applyEnvInjection(prefs: UserPreferences): void {
 	}
 }
 
+function persistSelectedModel(provider: string, model: string, cwd: string, notify?: (message: string, level: "error") => void): void {
+	const prefPath = getPreferencesPath(cwd);
+	let prefs: UserPreferences = {};
+
+	try {
+		if (fs.existsSync(prefPath)) {
+			prefs = JSON.parse(fs.readFileSync(prefPath, "utf-8")) as UserPreferences;
+		}
+		prefs.defaultProvider = provider;
+		prefs.defaultModel = model;
+		fs.writeFileSync(prefPath, `${JSON.stringify(prefs, null, 2)}\n`, "utf-8");
+		cachedPreferences = prefs;
+	} catch (err) {
+		console.error("[preferences-loader] Erreur lors de l'enregistrement du modèle par défaut:", err);
+		notify?.("Impossible d'enregistrer le modèle par défaut dans preferences.json", "error");
+	}
+}
+
 // Initialise eagerly on module import
 loadUserPreferences();
 
 export default function preferencesLoaderExtension(pi: ExtensionAPI) {
+	pi.on("model_select", async (event, ctx) => {
+		persistSelectedModel(event.model.provider, event.model.id, ctx.cwd, (message, level) => {
+			if (ctx.hasUI) ctx.ui.notify(message, level);
+		});
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
 		const prefs = loadUserPreferences(ctx.cwd, true);
 
