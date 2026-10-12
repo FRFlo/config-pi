@@ -28,5 +28,8 @@
       }
     }
   },
+  "terminal": {
+    "notify": "next-turn"
+  },
   "hideThinkingBlock": true
 }

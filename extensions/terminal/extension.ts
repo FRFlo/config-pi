@@ -6,7 +6,7 @@ import { MonitorNotifier } from "./monitor-notify.ts";
 import { MONITOR_STATUS_KEY } from "./monitor-status.ts";
 import { MonitorStatusTicker } from "./monitor-status-ticker.ts";
 import { TerminalNotifier } from "./notify.ts";
-import { TERMINAL_PROMPT_SECTION } from "./prompt.ts";
+import { createTerminalPromptSection } from "./prompt.ts";
 import type { TerminalRuntimeSession } from "./runtime-session.ts";
 import {
 	claimParkedBundle,
@@ -251,7 +251,12 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 
 	pi.on("before_agent_start", async (event) => {
 		if (state.steppedAside) return undefined;
-		return { systemPrompt: `${event.systemPrompt}\n${TERMINAL_PROMPT_SECTION}` };
+		const activeSessionIds = state.bundle
+			?.backgroundSnapshot()
+			.map((session) => session.id) ?? [];
+		const terminalPrompt = createTerminalPromptSection(activeSessionIds);
+		if (!terminalPrompt) return undefined;
+		return { systemPrompt: `${event.systemPrompt}\n${terminalPrompt}` };
 	});
 
 	pi.on("session_shutdown", async (event, ctx) => {
