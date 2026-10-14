@@ -52,6 +52,17 @@ interface OtherAnswer {
 type AskAnswer = TextAnswer | OptionAnswer | OtherAnswer;
 type AskUserQuestionStatus = "answered" | "cancelled" | "unavailable";
 type AskUserQuestionMode = "text" | "single-select" | "multi-select";
+const QUESTION_STATE_TYPE = "ask-user-question-state";
+
+interface PersistedQuestion {
+	status: "pending" | "answered" | "cancelled";
+	question: string;
+	details?: string;
+	context?: string;
+	mode: AskUserQuestionMode;
+	options: AskOption[];
+	draft?: string;
+}
 
 interface AskUserQuestionResultDetails {
 	status: AskUserQuestionStatus;
@@ -304,25 +315,26 @@ async function askTextMode(
 	question: string,
 	details: string | undefined,
 	context: string | undefined,
+	initialDraft = "",
+	persist?: (draft: string) => void,
 ): Promise<{ answers: AskAnswer[] | null; retry?: boolean }> {
 	const discordConfig = loadDiscordBridgeConfig();
-	const timeoutSeconds = discordConfig.enabled !== false ? (typeof discordConfig.timeoutSeconds === "number" ? discordConfig.timeoutSeconds : 0) : -1;
 
 	return ctx.ui.custom<{ answers: AskAnswer[] | null; retry?: boolean }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null; retry?: boolean }) => void) => {
 		let cachedLines: string[] | undefined;
 		let cachedWidth = -1;
 		let finished = false;
 		let delegationStatus: string | undefined;
-		let timer: any = null;
 		const questionId = Math.random().toString(36).slice(2, 10);
 		let isDelegating = false;
 		const abortCtrl = new AbortController();
 		const editor = new Editor(tui, createEditorTheme(theme));
+		editor.setText(initialDraft);
 
 		function safeDone(result: { answers: AskAnswer[] | null; retry?: boolean }) {
 			if (finished) return;
 			finished = true;
-			if (timer) clearTimeout(timer);
+			persist?.(editor.getText());
 			if (isDelegating) {
 				if (result.answers) {
 					const answerText = formatAnswersForContent(result.answers);
@@ -357,7 +369,7 @@ async function askTextMode(
 			tui.requestRender();
 		}
 
-		if (timeoutSeconds >= 0 && discordConfig.endpoint) {
+		if (discordConfig.enabled !== false && discordConfig.endpoint) {
 			const startDelegation = () => {
 				if (finished) return;
 				isDelegating = true;
@@ -372,7 +384,6 @@ async function askTextMode(
 						details,
 						context,
 						recentMessages,
-						timeoutSeconds: 0,
 					},
 					abortCtrl.signal,
 					discordConfig,
@@ -390,9 +401,6 @@ async function askTextMode(
 							safeDone({ answers: null, retry: true });
 						} else if (res.status === "cancelled") {
 							safeDone({ answers: null });
-						} else if (res.status === "timeout") {
-							delegationStatus = "Question toujours active sur Discord (sans limite de temps)";
-							refresh();
 						} else {
 							delegationStatus = `Erreur Discord: ${res.error || "Pas de réponse"}`;
 							refresh();
@@ -406,11 +414,7 @@ async function askTextMode(
 					});
 			};
 
-			if (timeoutSeconds === 0) {
-				startDelegation();
-			} else {
-				timer = setTimeout(startDelegation, timeoutSeconds * 1000);
-			}
+			startDelegation();
 		}
 
 		function handleInput(data: string) {
@@ -419,6 +423,7 @@ async function askTextMode(
 				return;
 			}
 			editor.handleInput(data);
+			persist?.(editor.getText());
 			refresh();
 		}
 
@@ -442,9 +447,6 @@ async function askTextMode(
 
 			if (delegationStatus) {
 				add(theme.fg("warning", ` 🤖 [Discord Relay] ${delegationStatus}`));
-				lines.push("");
-			} else if (timeoutSeconds > 0) {
-				add(theme.fg("dim", ` (Délégation Discord si inactif pendant ${timeoutSeconds}s)`));
 				lines.push("");
 			}
 
@@ -489,7 +491,6 @@ async function askSingleChoice(
 	];
 
 	const discordConfig = loadDiscordBridgeConfig();
-	const timeoutSeconds = discordConfig.enabled !== false ? (typeof discordConfig.timeoutSeconds === "number" ? discordConfig.timeoutSeconds : 45) : -1;
 
 	return ctx.ui.custom<{ answers: AskAnswer[] | null; retry?: boolean }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null; retry?: boolean }) => void) => {
 		let optionIndex = 0;
@@ -498,7 +499,6 @@ async function askSingleChoice(
 		let cachedWidth = -1;
 		let finished = false;
 		let delegationStatus: string | undefined;
-		let timer: any = null;
 		const questionId = Math.random().toString(36).slice(2, 10);
 		let isDelegating = false;
 		const abortCtrl = new AbortController();
@@ -507,7 +507,6 @@ async function askSingleChoice(
 		function safeDone(result: { answers: AskAnswer[] | null; retry?: boolean }) {
 			if (finished) return;
 			finished = true;
-			if (timer) clearTimeout(timer);
 			if (isDelegating) {
 				if (result.answers) {
 					const answerText = formatAnswersForContent(result.answers);
@@ -539,7 +538,7 @@ async function askSingleChoice(
 			tui.requestRender();
 		}
 
-		if (timeoutSeconds >= 0 && discordConfig.endpoint) {
+		if (discordConfig.enabled !== false && discordConfig.endpoint) {
 			const startDelegation = () => {
 				if (finished) return;
 				isDelegating = true;
@@ -556,7 +555,6 @@ async function askSingleChoice(
 						recentMessages,
 						options,
 						multiSelect: false,
-						timeoutSeconds: 0,
 					},
 					abortCtrl.signal,
 					discordConfig,
@@ -592,9 +590,6 @@ async function askSingleChoice(
 							safeDone({ answers: null, retry: true });
 						} else if (res.status === "cancelled") {
 							safeDone({ answers: null });
-						} else if (res.status === "timeout") {
-							delegationStatus = "Question toujours active sur Discord (sans limite de temps)";
-							refresh();
 						} else {
 							delegationStatus = `Erreur Discord: ${res.error || "Pas de réponse"}`;
 							refresh();
@@ -608,11 +603,7 @@ async function askSingleChoice(
 					});
 			};
 
-			if (timeoutSeconds === 0) {
-				startDelegation();
-			} else {
-				timer = setTimeout(startDelegation, timeoutSeconds * 1000);
-			}
+			startDelegation();
 		}
 
 		function handleInput(data: string) {
@@ -683,9 +674,6 @@ async function askSingleChoice(
 
 			if (delegationStatus) {
 				add(theme.fg("warning", ` 🤖 [Discord Relay] ${delegationStatus}`));
-				lines.push("");
-			} else if (timeoutSeconds > 0) {
-				add(theme.fg("dim", ` (Délégation Discord si inactif pendant ${timeoutSeconds}s)`));
 				lines.push("");
 			}
 
@@ -766,7 +754,6 @@ async function askMultiChoice(
 	];
 
 	const discordConfig = loadDiscordBridgeConfig();
-	const timeoutSeconds = discordConfig.enabled !== false ? (typeof discordConfig.timeoutSeconds === "number" ? discordConfig.timeoutSeconds : 45) : -1;
 
 	return ctx.ui.custom<{ answers: AskAnswer[] | null; retry?: boolean }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null; retry?: boolean }) => void) => {
 		let optionIndex = 0;
@@ -775,7 +762,6 @@ async function askMultiChoice(
 		let cachedWidth = -1;
 		let finished = false;
 		let delegationStatus: string | undefined;
-		let timer: any = null;
 		const questionId = Math.random().toString(36).slice(2, 10);
 		let isDelegating = false;
 		const abortCtrl = new AbortController();
@@ -785,7 +771,6 @@ async function askMultiChoice(
 		function safeDone(result: { answers: AskAnswer[] | null; retry?: boolean }) {
 			if (finished) return;
 			finished = true;
-			if (timer) clearTimeout(timer);
 			if (isDelegating) {
 				if (result.answers) {
 					const answerText = formatAnswersForContent(result.answers);
@@ -819,7 +804,7 @@ async function askMultiChoice(
 			tui.requestRender();
 		}
 
-		if (timeoutSeconds >= 0 && discordConfig.endpoint) {
+		if (discordConfig.enabled !== false && discordConfig.endpoint) {
 			const startDelegation = () => {
 				if (finished) return;
 				isDelegating = true;
@@ -836,7 +821,6 @@ async function askMultiChoice(
 						recentMessages,
 						options,
 						multiSelect: true,
-						timeoutSeconds: 0,
 					},
 					abortCtrl.signal,
 					discordConfig,
@@ -865,9 +849,6 @@ async function askMultiChoice(
 							safeDone({ answers: null, retry: true });
 						} else if (res.status === "cancelled") {
 							safeDone({ answers: null });
-						} else if (res.status === "timeout") {
-							delegationStatus = "Question toujours active sur Discord (sans limite de temps)";
-							refresh();
 						} else {
 							delegationStatus = `Erreur Discord: ${res.error || "Pas de réponse"}`;
 							refresh();
@@ -881,11 +862,7 @@ async function askMultiChoice(
 					});
 			};
 
-			if (timeoutSeconds === 0) {
-				startDelegation();
-			} else {
-				timer = setTimeout(startDelegation, timeoutSeconds * 1000);
-			}
+			startDelegation();
 		}
 
 		function toggleOption(item: DisplayOption) {
@@ -987,9 +964,6 @@ async function askMultiChoice(
 			if (delegationStatus) {
 				add(theme.fg("warning", ` 🤖 [Discord Relay] ${delegationStatus}`));
 				lines.push("");
-			} else if (timeoutSeconds > 0) {
-				add(theme.fg("dim", ` (Délégation Discord si inactif pendant ${timeoutSeconds}s)`));
-				lines.push("");
 			}
 
 			for (let i = 0; i < allItems.length; i++) {
@@ -1078,6 +1052,35 @@ function withUILock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 export default function askUserQuestion(pi: ExtensionAPI) {
+	let restoredQuestionOpen = false;
+	pi.on("session_start", async (_event, ctx) => {
+		if (!ctx.hasUI || restoredQuestionOpen) return;
+		const entries = ctx.sessionManager.getBranch();
+		let pending: PersistedQuestion | undefined;
+		for (let i = entries.length - 1; i >= 0; i--) {
+			const entry = entries[i] as any;
+			if (entry?.type === "custom" && entry.customType === QUESTION_STATE_TYPE) {
+				if (entry.data?.status === "pending") pending = entry.data;
+				break;
+			}
+		}
+		if (!pending) return;
+		restoredQuestionOpen = true;
+		await withUILock(async () => {
+			const persist = (draft?: string, status: PersistedQuestion["status"] = "pending") =>
+				pi.appendEntry(QUESTION_STATE_TYPE, { ...pending, draft, status });
+			const result = await askTextMode(
+				ctx,
+				pending!.question,
+				pending!.details,
+				pending!.context,
+				pending!.draft || "",
+				(draft) => persist(draft, "pending"),
+			);
+			persist(result.answers?.map((answer) => answer.value).join("\n") || pending!.draft, result.answers ? "answered" : "pending");
+		});
+	});
+
 	const askUserQuestionTool = {
 		name: "ask_user_question",
 		label: "ask_user_question",
@@ -1118,7 +1121,19 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 
 			return withUILock(async () => {
 				if (mode === "text") {
-					const res = await askTextMode(ctx, params.question, details, context);
+					const persisted: PersistedQuestion = {
+						status: "pending",
+						question: params.question,
+						details,
+						context,
+						mode,
+						options,
+					};
+					pi.appendEntry(QUESTION_STATE_TYPE, persisted);
+					const res = await askTextMode(ctx, params.question, details, context, "", (draft) =>
+						pi.appendEntry(QUESTION_STATE_TYPE, { ...persisted, draft }),
+					);
+					pi.appendEntry(QUESTION_STATE_TYPE, { ...persisted, draft: res.answers?.[0]?.value, status: res.answers ? "answered" : "pending" });
 					if (res.retry) {
 						return cancelledResult(params.question, mode, context, "Action interrompue pour forker / réessayer la session depuis Discord.");
 					}

@@ -8,7 +8,6 @@ export interface DiscordBridgeConfig {
 	enabled?: boolean;
 	endpoint?: string;
 	apiKey?: string;
-	timeoutSeconds?: number;
 	channelId?: string;
 }
 
@@ -31,7 +30,6 @@ export interface AskQuestionPayload {
 	recentMessages?: RecentTurnMessage[];
 	options?: OptionItem[];
 	multiSelect?: boolean;
-	timeoutSeconds?: number;
 }
 
 export interface AnswerItem {
@@ -43,7 +41,7 @@ export interface AnswerItem {
 
 export interface DiscordQuestionResponse {
 	ok: boolean;
-	status: "answered" | "cancelled" | "retry" | "timeout";
+	status: "answered" | "cancelled" | "retry";
 	answers: AnswerItem[];
 	error?: string;
 	message?: string;
@@ -54,7 +52,6 @@ export function loadDiscordBridgeConfig(): DiscordBridgeConfig {
 		enabled: true,
 		endpoint: process.env.PI_BRIDGE_ENDPOINT || "",
 		apiKey: process.env.PI_BRIDGE_API_KEY || "",
-		timeoutSeconds: 0,
 		channelId: process.env.PI_BRIDGE_CHANNEL_ID || "",
 	};
 
@@ -179,7 +176,6 @@ export async function askDiscordQuestion(
 				recentMessages: params.recentMessages,
 				options: params.options,
 				multiSelect: params.multiSelect,
-				timeoutSeconds: typeof params.timeoutSeconds === "number" ? params.timeoutSeconds : 0,
 				channelId: cfg.channelId,
 			}),
 			signal,
