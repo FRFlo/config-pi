@@ -373,8 +373,6 @@ async function askTextMode(
 			const startDelegation = () => {
 				if (finished) return;
 				isDelegating = true;
-				delegationStatus = "Question déléguée à Discord via pi-bridge...";
-				refresh();
 
 				const recentMessages = extractRecentConversation(ctx.sessionManager, 6);
 				askDiscordQuestion(
@@ -542,8 +540,6 @@ async function askSingleChoice(
 			const startDelegation = () => {
 				if (finished) return;
 				isDelegating = true;
-				delegationStatus = "Question déléguée à Discord via pi-bridge...";
-				refresh();
 
 				const recentMessages = extractRecentConversation(ctx.sessionManager, 6);
 				askDiscordQuestion(
@@ -808,8 +804,6 @@ async function askMultiChoice(
 			const startDelegation = () => {
 				if (finished) return;
 				isDelegating = true;
-				delegationStatus = "Question déléguée à Discord via pi-bridge...";
-				refresh();
 
 				const recentMessages = extractRecentConversation(ctx.sessionManager, 6);
 				askDiscordQuestion(
