@@ -34,7 +34,7 @@ export default function observationalMemory(pi: ExtensionAPI): void {
 	// Worker subprocesses must load normal extension-discovered providers (for example
 	// antigravity from the user's packages). Since that also discovers this global master
 	// extension, no-op when the dedicated worker extension is active via OM_WORKER.
-	if (process.env.OM_WORKER === "observer" || process.env.OM_WORKER === "consolidator") return;
+	if (process.env.OM_WORKER) return;
 
 	const runtime = new Runtime();
 

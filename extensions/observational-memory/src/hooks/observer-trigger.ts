@@ -150,7 +150,8 @@ async function dispatchObserver(
 			kickoffPrompt: userText,
 		});
 		const env = buildWorkerEnv("observer", { memoryRoot: runtime.memoryRoot, runId, backend: runtime.config.backend });
-		const exit = await spawnWorker({ argv, cwd: runtime.memoryRoot, env, stdin: userText, signal: controller.signal });
+		const projectRoot = runtime.memoryRoot.replace(/[\\/]\.memory[\\/][^\\/]+$/, "");
+		const exit = await spawnWorker({ argv, cwd: projectRoot, env, stdin: userText, signal: controller.signal });
 		// Capture cost before the exit-code check so a partial run's spend is still recorded.
 		recordWorkerCost(pi, runtime, ctx, "observer", runId);
 		if (exit.code !== 0) {

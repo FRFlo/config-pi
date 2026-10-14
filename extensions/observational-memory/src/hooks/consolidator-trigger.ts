@@ -117,7 +117,8 @@ async function dispatchConsolidator(
 			kickoffPrompt: prompt,
 		});
 		const env = buildWorkerEnv("consolidator", { memoryRoot: runtime.memoryRoot, runId, backend: runtime.config.backend });
-		const exit = await spawnWorker({ argv, cwd: runtime.memoryRoot, env, stdin: prompt, signal: controller.signal });
+		const projectRoot = runtime.memoryRoot.replace(/[\\/]\.memory[\\/][^\\/]+$/, "");
+		const exit = await spawnWorker({ argv, cwd: projectRoot, env, stdin: prompt, signal: controller.signal });
 		// Capture cost before the exit-code check so a partial run's spend is still recorded.
 		recordWorkerCost(pi, runtime, ctx, "consolidator", runId);
 		if (exit.code !== 0) {
@@ -140,6 +141,11 @@ async function dispatchConsolidator(
 
 		runtime.status.workerDone(runId, toDrop.length);
 		runtime.refreshFooterGauges(ctx.sessionManager.getBranch(), ctx.getContextUsage?.()?.tokens ?? null);
+		pi.events.emit("observational-memory:consolidated", {
+			projectRoot,
+			memoryRoot: runtime.memoryRoot,
+			model: runtime.config.models.consolidator,
+		});
 		if (ctx.hasUI && ctx.ui) {
 			runtime.queueToast(`om: consolidator promoted ${toDrop.length} obs`, "info", ctx.ui.notify.bind(ctx.ui));
 		}
