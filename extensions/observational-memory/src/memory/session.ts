@@ -12,10 +12,9 @@
  * Seeding is idempotent — once the dir exists it is never re-seeded, so resume and /tree never
  * disturb it. The transient `.runs/` IPC directory is excluded.
  */
-import { cpSync, existsSync, readFileSync, renameSync, rmSync } from "node:fs";
-import { basename, sep } from "node:path";
 import { sessionMemoryRoot } from "./paths.js";
 import { sqliteCloneScope, sqliteHasScope } from "./sqlite.js";
+import { readFileSync } from "node:fs";
 
 type SessionCtx = {
 	cwd: string;
@@ -25,17 +24,16 @@ type SessionCtx = {
 	};
 };
 
-/** Read a session file's header id (first JSONL line). Undefined on any parse/IO failure. */
 function readSessionHeaderId(file: string): string | undefined {
 	try {
-		const firstLine = readFileSync(file, "utf-8").split("\n", 1)[0] ?? "";
-		const header = JSON.parse(firstLine) as { type?: string; id?: string } | undefined;
-		return typeof header?.id === "string" ? header.id : undefined;
+		const header = JSON.parse(readFileSync(file, "utf-8").split("\n", 1)[0] ?? "") as { id?: string };
+		return typeof header.id === "string" ? header.id : undefined;
 	} catch {
 		return undefined;
 	}
 }
 
+/** Read a session file's header id (first JSONL line). Undefined on any parse/IO failure. */
 /**
  * Resolve the parent session's memory root for fork/clone seeding, or undefined when there is
  * no parent or the parent kept no memory under this project. The parent is discovered via the
@@ -47,12 +45,7 @@ function parentMemoryRoot(ctx: SessionCtx): string | undefined {
 	const parentId = readSessionHeaderId(parentFile);
 	if (!parentId) return undefined;
 	const root = sessionMemoryRoot(ctx.cwd, parentId);
-	return existsSync(root) || sqliteHasScope(root) ? root : undefined;
-}
-
-/** True for any path inside a `.runs` directory (transient IPC; never seeded). */
-function isRunsPath(p: string): boolean {
-	return basename(p) === ".runs" || p.includes(`${sep}.runs${sep}`);
+	return sqliteHasScope(root) ? root : undefined;
 }
 
 /**
@@ -64,27 +57,7 @@ function isRunsPath(p: string): boolean {
 export function ensureSessionMemory(ctx: SessionCtx): string {
 	const sessionId = ctx.sessionManager.getSessionId();
 	const root = sessionMemoryRoot(ctx.cwd, sessionId);
-	if (existsSync(root)) return root;
-
 	const parent = parentMemoryRoot(ctx);
-	if (parent) {
-		if (sqliteHasScope(parent)) {
-			sqliteCloneScope(parent, root);
-			return root;
-		}
-		// Copy parent memory (minus transient .runs/) via temp+rename so a concurrent reader never
-		// observes a half-seeded directory.
-		const tmp = `${root}.seed-tmp-${process.pid}-${Date.now()}`;
-		try {
-			cpSync(parent, tmp, { recursive: true, filter: (src) => !isRunsPath(src) });
-			renameSync(tmp, root);
-		} catch {
-			try {
-				rmSync(tmp, { recursive: true, force: true });
-			} catch {
-				/* best-effort cleanup */
-			}
-		}
-	}
+	if (parent) sqliteCloneScope(parent, root);
 	return root;
 }

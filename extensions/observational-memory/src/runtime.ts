@@ -1,7 +1,6 @@
 import { type Config, DEFAULTS, loadConfig } from "./config.js";
 import { foldLedger, poolTokens, rawTokensSinceObservationCoverage, sumSessionCost, type Entry } from "./ledger/index.js";
 import { initSqliteMemory } from "./memory/sqlite.js";
-import { mkdirSync } from "node:fs";
 import { StatusController } from "./ui/status-controller.js";
 
 /**
@@ -117,7 +116,6 @@ export class Runtime {
 		if (!this.enabled || !this.memoryRoot) return;
 		// The memory root is only a subprocess sandbox. Durable memory and worker
 		// handoff data live exclusively in the SQLite database.
-		mkdirSync(this.memoryRoot, { recursive: true });
 		initSqliteMemory(this.memoryRoot);
 	}
 

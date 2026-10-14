@@ -8,12 +8,10 @@
  * Scoping: every path argument is resolved against OM_MEMORY_DIR and rejected if it escapes
  * that directory, so a wayward model cannot read or clobber the user's project.
  */
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { resolve, relative } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { Static } from "typebox";
-import { atomicWrite } from "../../src/memory/paths.js";
 import { renderIndexFile } from "../../src/memory/index-render.js";
 import { sqliteListFiles, sqliteListTopics, sqliteReadFile, sqliteWriteFile } from "../../src/memory/sqlite.js";
 
@@ -62,24 +60,9 @@ type EditInput = Static<typeof EditSchema>;
 type LsInput = Static<typeof LsSchema>;
 type GrepInput = Static<typeof GrepSchema>;
 
-function listFilesRecursive(dir: string): string[] {
-	const out: string[] = [];
-	for (const name of readdirSync(dir)) {
-		if (name.startsWith(".")) continue; // skip .runs and temp files
-		const full = join(dir, name);
-		if (statSync(full).isDirectory()) out.push(...listFilesRecursive(full));
-		else out.push(full);
-	}
-	return out;
-}
-
 /** Register the consolidator's scoped file tools (read/write/edit/ls/grep), all under .memory/. */
 export function registerConsolidatorTools(pi: ExtensionAPI, memoryRoot: string): void {
 	const root = resolve(memoryRoot);
-	// Durable memory is always SQLite. The filesystem imports above are retained
-	// only for the scoped path checks and legacy migration compatibility.
-	const sqlite = true;
-
 	pi.registerTool({
 		name: "read",
 		label: "Read memory file",
@@ -88,13 +71,9 @@ export function registerConsolidatorTools(pi: ExtensionAPI, memoryRoot: string):
 		async execute(_id: string, params: ReadInput): Promise<ToolText> {
 			const abs = scoped(root, params.path);
 			if (!abs) return fail("path escapes .memory/");
-			if (sqlite) {
-				if (/(^|[/\\])INDEX\.md$/i.test(params.path)) return ok(renderIndexFile(sqliteListTopics(root)));
-				const content = sqliteReadFile(root, params.path);
-				return content === undefined ? fail(`no such file: ${params.path}`) : ok(content);
-			}
-			if (!existsSync(abs)) return fail(`no such file: ${params.path}`);
-			return ok(readFileSync(abs, "utf-8"));
+			if (/(^|[/\\])INDEX\.md$/i.test(params.path)) return ok(renderIndexFile(sqliteListTopics(root)));
+			const content = sqliteReadFile(root, params.path);
+			return content === undefined ? fail(`no such file: ${params.path}`) : ok(content);
 		},
 	});
 
@@ -107,11 +86,7 @@ export function registerConsolidatorTools(pi: ExtensionAPI, memoryRoot: string):
 			const abs = scoped(root, params.path);
 			if (!abs) return fail("path escapes .memory/");
 			if (/(^|[/\\])(INDEX|MEMORY)\.md$/i.test(params.path)) return fail("INDEX.md and MEMORY.md are generated automatically; do not write them");
-			if (sqlite) {
-				sqliteWriteFile(root, params.path, params.content);
-				return ok(`Wrote ${params.path} (${params.content.length} bytes).`);
-			}
-			atomicWrite(abs, params.content);
+			sqliteWriteFile(root, params.path, params.content);
 			return ok(`Wrote ${params.path} (${params.content.length} bytes).`);
 		},
 	});
@@ -125,21 +100,12 @@ export function registerConsolidatorTools(pi: ExtensionAPI, memoryRoot: string):
 			const abs = scoped(root, params.path);
 			if (!abs) return fail("path escapes .memory/");
 			if (/(^|[/\\])(INDEX|MEMORY)\.md$/i.test(params.path)) return fail("INDEX.md and MEMORY.md are generated automatically; do not edit them");
-			if (sqlite) {
-				const current = sqliteReadFile(root, params.path);
-				if (current === undefined) return fail(`no such file: ${params.path}`);
-				const occurrences = current.split(params.oldText).length - 1;
-				if (occurrences === 0) return fail("oldText not found");
-				if (occurrences > 1) return fail(`oldText is ambiguous (${occurrences} matches); add more context`);
-				sqliteWriteFile(root, params.path, current.replace(params.oldText, params.newText));
-				return ok(`Edited ${params.path}.`);
-			}
-			if (!existsSync(abs)) return fail(`no such file: ${params.path}`);
-			const current = readFileSync(abs, "utf-8");
+			const current = sqliteReadFile(root, params.path);
+			if (current === undefined) return fail(`no such file: ${params.path}`);
 			const occurrences = current.split(params.oldText).length - 1;
 			if (occurrences === 0) return fail("oldText not found");
 			if (occurrences > 1) return fail(`oldText is ambiguous (${occurrences} matches); add more context`);
-			atomicWrite(abs, current.replace(params.oldText, params.newText));
+			sqliteWriteFile(root, params.path, current.replace(params.oldText, params.newText));
 			return ok(`Edited ${params.path}.`);
 		},
 	});
@@ -152,12 +118,7 @@ export function registerConsolidatorTools(pi: ExtensionAPI, memoryRoot: string):
 		async execute(_id: string, params: LsInput): Promise<ToolText> {
 			const abs = scoped(root, params.path ?? ".");
 			if (!abs) return fail("path escapes .memory/");
-			if (sqlite) {
-				const entries = sqliteListFiles(root).filter((n) => !n.startsWith("."));
-				return ok(entries.length > 0 ? entries.sort().join("\n") : "(empty)");
-			}
-			if (!existsSync(abs)) return ok("(.memory/ is empty)");
-			const entries = readdirSync(abs).filter((n) => !n.startsWith("."));
+			const entries = sqliteListFiles(root).filter((n) => !n.startsWith("."));
 			return ok(entries.length > 0 ? entries.sort().join("\n") : "(empty)");
 		},
 	});
@@ -176,7 +137,7 @@ export function registerConsolidatorTools(pi: ExtensionAPI, memoryRoot: string):
 			}
 			const base = scoped(root, params.path ?? ".");
 			if (!base) return fail("path escapes .memory/");
-			if (sqlite) {
+			{
 				const restrict = params.path ? new Set([params.path, params.path.replace(/.*[/\\]/, "")]) : undefined;
 				const hits: string[] = [];
 				for (const file of sqliteListFiles(root)) {
@@ -190,18 +151,6 @@ export function registerConsolidatorTools(pi: ExtensionAPI, memoryRoot: string):
 				}
 				return ok(hits.length > 0 ? hits.join("\n") : "(no matches)");
 			}
-			if (!existsSync(base)) return ok("(no matches)");
-			const files = statSync(base).isDirectory() ? listFilesRecursive(base) : [base];
-			const hits: string[] = [];
-			for (const file of files) {
-				const lines = readFileSync(file, "utf-8").split("\n");
-				const relPath = relative(root, file);
-				lines.forEach((line, i) => {
-					if (re.test(line)) hits.push(`${relPath}:${i + 1}: ${line.trim()}`);
-				});
-				if (hits.length >= 200) break;
-			}
-			return ok(hits.length > 0 ? hits.join("\n") : "(no matches)");
 		},
 	});
 }

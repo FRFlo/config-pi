@@ -1,10 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { registerConsolidatorTools } from "../agent/consolidator/tools.js";
 import { buildWorkerEnv } from "../src/spawn/launch.js";
+import { sqliteReadFile } from "../src/memory/sqlite.js";
 
 describe("buildWorkerEnv(consolidator)", () => {
 	it("sets role, run id, and the .memory sandbox root", () => {
@@ -22,13 +23,15 @@ describe("registerConsolidatorTools (scoped to .memory/)", () => {
 
 	beforeEach(() => {
 		cwd = mkdtempSync(join(tmpdir(), "om-cons-tools-"));
-		memoryRoot = join(cwd, ".memory");
+		memoryRoot = join(cwd, ".memory", "session-1");
+		process.env.PI_OM_SQLITE_PATH = join(cwd, "memory.sqlite");
 		tools = new Map();
 		const fakePi = { registerTool: (def: any) => tools.set(def.name, def) } as any;
 		registerConsolidatorTools(fakePi, memoryRoot);
 	});
 	afterEach(() => {
 		rmSync(cwd, { recursive: true, force: true });
+		delete process.env.PI_OM_SQLITE_PATH;
 	});
 
 	it("registers the scoped tool belt (no terminal report tool)", () => {
@@ -38,7 +41,7 @@ describe("registerConsolidatorTools (scoped to .memory/)", () => {
 	it("write then read a topic file", async () => {
 		const res = await tools.get("write").execute("1", { path: "auth.md", content: "---\nid: auth\n---\nbody" });
 		expect(res.content[0].text).toContain("Wrote auth.md");
-		expect(readFileSync(join(memoryRoot, "auth.md"), "utf-8")).toContain("body");
+		expect(sqliteReadFile(memoryRoot, "auth.md")).toContain("body");
 		const read = await tools.get("read").execute("2", { path: "auth.md" });
 		expect(read.content[0].text).toContain("body");
 	});
@@ -61,7 +64,7 @@ describe("registerConsolidatorTools (scoped to .memory/)", () => {
 		expect(ambiguous.content[0].text).toContain("ambiguous");
 		const ok = await tools.get("edit").execute("3", { path: "t.md", oldText: "beta", newText: "BETA" });
 		expect(ok.content[0].text).toContain("Edited");
-		expect(readFileSync(join(memoryRoot, "t.md"), "utf-8")).toBe("alpha BETA alpha");
+		expect(sqliteReadFile(memoryRoot, "t.md")).toBe("alpha BETA alpha");
 	});
 
 	it("ls and grep operate within .memory/", async () => {

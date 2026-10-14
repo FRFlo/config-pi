@@ -4,8 +4,7 @@
  *
  * No memory files are written by the extension.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { sqliteHasScope, sqliteListTopics, sqliteReadJourney } from "./sqlite.js";
 
 export const INDEX_FILENAME = "INDEX.md";
@@ -44,25 +43,14 @@ export function snapshotPath(root: string): string {
 	return join(resolve(root, ".."), SNAPSHOT_FILENAME);
 }
 
-/** Read `.memory/JOURNEY.md` body, trimmed. Returns undefined when missing or effectively empty. */
-export function readJourney(root: string): string | undefined {
-	if (sqliteHasScope(root)) return sqliteReadJourney(root);
-	const path = journeyPath(root);
-	if (!existsSync(path)) return undefined;
-	try {
-		const body = readFileSync(path, "utf-8").trim();
-		return body.length > 0 ? body : undefined;
-	} catch {
-		return undefined;
-	}
+/** @deprecated Memory persistence is SQLite-only; retained for legacy callers. */
+export function atomicWrite(_path: string, _content: string): void {
+	throw new Error("Filesystem memory writes are disabled; use the SQLite backend.");
 }
 
-/** Atomic write (temp + rename). Creates parent dirs as needed. */
-export function atomicWrite(path: string, content: string): void {
-	mkdirSync(dirname(path), { recursive: true });
-	const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-	writeFileSync(tmp, content, "utf-8");
-	renameSync(tmp, path);
+/** Read `.memory/JOURNEY.md` body, trimmed. Returns undefined when missing or effectively empty. */
+export function readJourney(root: string): string | undefined {
+	return sqliteHasScope(root) ? sqliteReadJourney(root) : undefined;
 }
 
 /**
@@ -132,21 +120,5 @@ export function parseFrontMatter(content: string): { front: TopicFrontMatter; bo
  * `.memory/<sessionId>/auth.md`) so the master can `read`/`grep` it directly from the map.
  */
 export function listTopics(root: string): Topic[] {
-	if (sqliteHasScope(root)) return sqliteListTopics(root);
-	if (!existsSync(root)) return [];
-	const cwd = resolve(root, "..", "..");
-	const topics: Topic[] = [];
-	for (const filename of readdirSync(root)) {
-		if (!filename.endsWith(".md") || filename === INDEX_FILENAME || filename === JOURNEY_FILENAME || filename === SNAPSHOT_FILENAME) continue;
-		let content: string;
-		try {
-			content = readFileSync(join(root, filename), "utf-8");
-		} catch {
-			continue;
-		}
-		const { front } = parseFrontMatter(content);
-		topics.push({ ...front, path: toPortablePath(relative(cwd, join(root, filename))), filename });
-	}
-	topics.sort((a, b) => (a.filename < b.filename ? -1 : a.filename > b.filename ? 1 : 0));
-	return topics;
+	return sqliteListTopics(root);
 }
