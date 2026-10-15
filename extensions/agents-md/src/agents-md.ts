@@ -120,6 +120,7 @@ export async function updateAgentsMd(
 	options: { memoryRoot: string; model: ConfiguredModel },
 	projectRoot: string,
 	mode: { rebuild: boolean },
+	onProgress?: (progress: { current: number; total: number; pageId: string }) => void,
 ): Promise<void> {
 	const root = resolve(projectRoot);
 	const targets = findAgentsFiles(root);
@@ -131,27 +132,26 @@ export async function updateAgentsMd(
 	for (let index = 0; index < run.pages.length; index++) {
 		const page = run.pages[index];
 		if (page.processed) continue;
+		onProgress?.({ current: processedThisRun + 1, total: run.pages.filter((item) => !item.processed).length, pageId: page.pageId });
 		const isSeed = rebuildSeed && processedThisRun === 0;
 		const existingContents = new Map<string, string>();
 		const readOnlyTargets = new Set<string>();
 		let existingBudget = EXISTING_CONTEXT_BUDGET;
-		if (!isSeed) {
-			for (const target of targets) {
+		for (const target of targets) {
+			try {
+				const content = readSafeAgentsFile(root, target);
+				if (content.length > EXISTING_FILE_CONTEXT_LIMIT || content.length > existingBudget) {
+					readOnlyTargets.add(target);
+					continue;
+				}
+				existingContents.set(target, content);
+				existingBudget -= content.length;
+			} catch {
 				try {
-					const content = readSafeAgentsFile(root, target);
-					if (content.length > EXISTING_FILE_CONTEXT_LIMIT || content.length > existingBudget) {
-						readOnlyTargets.add(target);
-						continue;
-					}
-					existingContents.set(target, content);
-					existingBudget -= content.length;
+					lstatSync(target);
+					readOnlyTargets.add(target);
 				} catch {
-					try {
-						lstatSync(target);
-						readOnlyTargets.add(target);
-					} catch {
-						// New candidates have no baseline content to include.
-					}
+					// New candidates have no baseline content to include.
 				}
 			}
 		}
@@ -201,7 +201,8 @@ export async function updateAgentsMd(
 			`Assigned memory page ${index + 1} of ${status.totalPages}: ${page.pageId}\n` +
 			`Source: session ${page.sessionId}, ${page.filename}${page.totalParts > 1 ? ` (part ${page.partIndex + 1}/${page.totalParts})` : ""}\n` +
 			`Read this page with read_memory_page before deciding. Acknowledge only after any file writes succeed.\n\n` +
-			`AGENTS.md targets (existing files are preserved unless this is the full-rebuild seed; candidates are optional; read-only targets cannot be written):\n${targetContext}\n\n` +
+			`AGENTS.md quality and organization requirements: write concise, actionable, verified instructions rather than a memory dump; root files contain project-wide commands, conventions, tests, and constraints; nested files contain only genuinely local guidance not already covered by an ancestor. Use clear Markdown headings and bullets, exact commands where verified, and avoid duplication, contradictions, transient tasks, speculation, and facts obvious from code. Preserve useful existing organization and user-authored guidance; omit uncertain rules or scope.\n\n` +
+			`AGENTS.md targets (audit all supplied existing files and refactor non-compliant writable ones while preserving verified guidance; candidates are optional; read-only targets cannot be written):\n${targetContext}\n\n` +
 			`Existing AGENTS.md contents:${existing || "\n(none; start this rebuild seed from verified memory only)"}\n\n` +
 			`Recent processed-page notes:\n${history || "(none)"}`;
 		const runId = `agents-${Date.now()}-${process.pid}-${index}`;
@@ -234,28 +235,56 @@ export async function updateAgentsMd(
 }
 
 export function registerAgentsMdCommands(pi: ExtensionAPI): void {
+	const runCommand = async (ctx: any, rebuild: boolean): Promise<void> => {
+		const widgetKey = "om-agents-md";
+		const frames = ["◌", "○", "⊙", "●", "⊙", "○"];
+		let frame = 0;
+		let label = "starting";
+		let timer: ReturnType<typeof setInterval> | undefined;
+		const render = (text: string) => {
+			label = text;
+			if (!ctx.hasUI) return;
+			ctx.ui.setWidget(widgetKey, [`${ctx.ui.theme.fg("warning", frames[frame])} ${ctx.ui.theme.fg("warning", "[agents-md]")} ${label}`]);
+		};
+		try {
+			if (ctx.hasUI) {
+				render("starting");
+				timer = setInterval(() => {
+					frame = (frame + 1) % frames.length;
+					ctx.ui.setWidget(widgetKey, [`${ctx.ui.theme.fg("warning", frames[frame])} ${ctx.ui.theme.fg("warning", "[agents-md]")} ${label}`]);
+				}, 120);
+				timer.unref?.();
+			}
+			const memoryRoot = resolve(ctx.cwd, ".memory", ctx.sessionManager.getSessionId());
+			await updateAgentsMd(
+				{ memoryRoot, model: loadConfig(ctx.cwd).models.consolidator },
+				ctx.cwd,
+				{ rebuild },
+				(progress) => render(`page ${progress.current}/${progress.total} · ${progress.pageId.slice(0, 8)}`),
+			);
+			if (ctx.hasUI) {
+				render("✓ complete");
+				ctx.ui.notify(rebuild ? "om: AGENTS.md files rebuilt from all project sessions" : "om: AGENTS.md files updated from new or changed memories across all project sessions", "info");
+			}
+		} catch (error) {
+			if (ctx.hasUI) {
+				render("✗ failed");
+				ctx.ui.notify(`om: AGENTS.md update failed: ${String(error)}`, "error");
+			}
+		} finally {
+			if (timer) clearInterval(timer);
+			if (ctx.hasUI) {
+				const clear = setTimeout(() => ctx.ui.setWidget(widgetKey, undefined), 5000);
+				clear.unref?.();
+			}
+		}
+	};
 	pi.registerCommand("om:agents", {
 		description: "Incrementally update AGENTS.md files from all project sessions' memories",
-		handler: async (_args: string, ctx: any) => {
-			const memoryRoot = resolve(ctx.cwd, ".memory", ctx.sessionManager.getSessionId());
-			try {
-				await updateAgentsMd({ memoryRoot, model: loadConfig(ctx.cwd).models.consolidator }, ctx.cwd, { rebuild: false });
-				if (ctx.hasUI) ctx.ui.notify("om: AGENTS.md files updated from new or changed memories across all project sessions", "info");
-			} catch (error) {
-				if (ctx.hasUI) ctx.ui.notify(`om: AGENTS.md update failed: ${String(error)}`, "error");
-			}
-		},
+		handler: async (_args: string, ctx: any) => runCommand(ctx, false),
 	});
 	pi.registerCommand("om:agents:all", {
 		description: "Rebuild AGENTS.md files from all project sessions' memories",
-		handler: async (_args: string, ctx: any) => {
-			const memoryRoot = resolve(ctx.cwd, ".memory", ctx.sessionManager.getSessionId());
-			try {
-				await updateAgentsMd({ memoryRoot, model: loadConfig(ctx.cwd).models.consolidator }, ctx.cwd, { rebuild: true });
-				if (ctx.hasUI) ctx.ui.notify("om: AGENTS.md files rebuilt from all project sessions", "info");
-			} catch (error) {
-				if (ctx.hasUI) ctx.ui.notify(`om: AGENTS.md update failed: ${String(error)}`, "error");
-			}
-		},
+		handler: async (_args: string, ctx: any) => runCommand(ctx, true),
 	});
 }

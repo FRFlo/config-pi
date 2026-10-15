@@ -73,6 +73,7 @@ describe("AGENTS commands", () => {
 		const project = tempRoot();
 		mkdirSync(join(project, "src", "app"), { recursive: true });
 		mkdirSync(join(project, "src", "deep"), { recursive: true });
+		writeFileSync(join(project, "AGENTS.md"), "# Legacy project guidance\nKeep changes small.\n");
 		process.env.PI_OM_SQLITE_PATH = join(project, "memories.sqlite");
 		sqliteWriteFile(join(project, ".memory", "session-a"), "auth.md", "session A auth rules");
 		sqliteWriteFile(join(project, ".memory", "session-b"), "build.md", "session B build rules");
@@ -94,6 +95,8 @@ describe("AGENTS commands", () => {
 		expect(prompts).toHaveLength(4);
 		for (const prompt of prompts) {
 			expect(prompt).toContain("Assigned memory page");
+			expect(prompt).toContain("Legacy project guidance");
+			expect(prompt).toContain("audit all supplied existing files and refactor non-compliant writable ones");
 			expect(prompt.replace(/\\/g, "/")).toContain("src/app/AGENTS.md");
 			expect(prompt.replace(/\\/g, "/")).toContain("src/deep/AGENTS.md");
 			expect(prompt).toContain("directory contents:");
