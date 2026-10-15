@@ -14,3 +14,7 @@
 [submodule "git/github.com/code-yeongyu/pi-todotools"]
 	path = git/github.com/code-yeongyu/pi-todotools
 	url = https://github.com/code-yeongyu/pi-todotools.git
+[submodule "extensions/interactive-subagents"]
+	path = extensions/interactive-subagents
+	url = https://github.com/FRFlo/pi-interactive-subagents
+	branch = main
