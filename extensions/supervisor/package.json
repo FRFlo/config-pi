@@ -1,0 +1,15 @@
+{
+  "name": "pi-supervisor-extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "format": "oxfmt index.ts logic.ts logic.test.ts",
+    "format-check": "oxfmt --check index.ts logic.ts logic.test.ts",
+    "lint": "oxlint index.ts logic.ts logic.test.ts",
+    "test": "bun test logic.test.ts"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.72.0",
+    "oxlint": "^1.87.0"
+  }
+}
