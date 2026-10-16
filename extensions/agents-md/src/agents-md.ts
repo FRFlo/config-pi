@@ -208,7 +208,6 @@ export async function updateAgentsMd(
 		const runId = `agents-${Date.now()}-${process.pid}-${index}`;
 		const argv = buildWorkerArgv({
 			model: options.model,
-			sessionName: `om-agents-${runId}`,
 			kickoffPrompt: prompt,
 			agentExtensionPath: WORKER_EXTENSION,
 		});

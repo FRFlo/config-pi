@@ -91,7 +91,9 @@ describe("AGENTS commands", () => {
 		await commands.get("om:agents")!.handler("", ctx);
 		await commands.get("om:agents:all")!.handler("", ctx);
 
-		const prompts = vi.mocked(spawnWorker).mock.calls.map(([options]) => options.stdin ?? "");
+		const workerCalls = vi.mocked(spawnWorker).mock.calls;
+		expect(workerCalls.every(([options]) => options.argv.includes("--no-session"))).toBe(true);
+		const prompts = workerCalls.map(([options]) => options.stdin ?? "");
 		expect(prompts).toHaveLength(4);
 		for (const prompt of prompts) {
 			expect(prompt).toContain("Assigned memory page");
