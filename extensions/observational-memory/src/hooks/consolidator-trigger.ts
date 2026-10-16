@@ -12,8 +12,8 @@
  * observer committed during the run (those are not in the handed batch). The consolidator does
  * not report back: it must consolidate everything it was given (filing or discarding junk is a
  * valid outcome), so on clean exit we trust it and drop the whole batch. This guarantees the
- * buffer always drains; a flaked-out partial run is recoverable from the worker's global session
- * recording (the standing safety net for lossy rewrites) and is the critic tier's job to catch.
+ * buffer always drains; worker runs are ephemeral, while their changes are applied directly to
+ * durable memory files and failures are surfaced for a later retry.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
@@ -113,7 +113,6 @@ async function dispatchConsolidator(
 		const prompt = buildConsolidatorPrompt(runtime.memoryRoot, promote, runtime.config.journeyTargetTokens);
 		const argv = buildWorkerArgv({
 			model: runtime.config.models.consolidator,
-			sessionName: `om-consolidator-${runId}`,
 			kickoffPrompt: prompt,
 		});
 		const env = buildWorkerEnv("consolidator", { memoryRoot: runtime.memoryRoot, runId, backend: runtime.config.backend });

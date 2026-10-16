@@ -13,7 +13,7 @@ Priorities: **performance > speed >= cost**. Cost is the least important factor.
 | # | Topic | Decision |
 |---|---|---|
 | L1 | **Build order** | **Phased: A (short-term tier + TUI) → B (long-term tier).** TUI is built from the start (it is the observability surface for the extension itself), not deferred. |
-| L2 | **Worker spawning** | **Bespoke `child_process.spawn` of `pi -e <agent-ext> -p`** (the yt-edit launcher pattern). *Not* the `subagents` extension — that uses `--no-session --mode json`, which would defeat decision 11's "every worker is an ordinary recorded global session" observability requirement. |
+| L2 | **Worker spawning** | **Bespoke `child_process.spawn` of `pi -e <agent-ext> -p --no-session`**. Worker results use IPC and must not clutter the user's session history. |
 | L3 | **OM code reuse** | **Vendor/fork** the needed OM modules into this repo (`session-ledger` fold/progress/projection/render, `tokens`, `ids`, `serialize`, `debug-log`), **trimmed to the minimal `{timestamp, content}` schema** and with the reflections tier removed. No runtime dependency on the unstable OM `master` checkout. |
 | L4 | **Extension structure** | **One shared agent extension, env-parameterized by worker type** (`OM_WORKER=observer\|consolidator`), mirroring yt-edit's `FINALIZE_MODE` switch. Plus a separate **master-side orchestrator** extension. |
 | L5 | **Timestamp-id** | **Orchestrator-assigned**, anchored to the chunk's source-entry times, with a deterministic disambiguator suffix. The observer emits minute-resolution event times (OM-proven); the orchestrator derives the precise unique id at commit. Avoids the LLM copy-fidelity risk (design risk 7). |
@@ -238,26 +238,21 @@ pi --no-extensions --no-skills --no-prompt-templates --no-context-files \
    --no-builtin-tools \
    --model <m> --thinking <t> \
    -e <repo>/agent/index.ts \
-   -n om-observer-<runId> \
+   --no-session \
    -p "<framing line + serialized chunk>"
 ```
 - `-p` is the print/headless flag; the positional arg is the **full prompt** = a short framing
-  line (current local time + instruction) followed by the serialized chunk. **The chunk is the
-  `-p` prompt** so it is recorded as a real user message in the worker's global session and
-  stays faithfully inspectable on resume (decision 11's observability requirement). This is the
-  old-OM shape (chunk in the user message), now carried by the recorded `-p` prompt.
-- **Why not the `context` hook / system prompt:** the `context` hook is non-destructive — its
-  injected messages are used for the LLM call but **never persisted** to the session, so the
-  chunk would be invisible when inspecting/resuming the observer run (verified). Putting the
-  chunk in the system prompt has the same recall value but is the wrong semantic slot. So the
-  chunk rides the recorded `-p` prompt instead.
+  line (current local time + instruction) followed by the serialized chunk. `--no-session`
+  prevents worker transcripts from appearing in session history; IPC carries results back to
+  the master extension.
+- The serialized chunk is passed in the `-p` input so the model receives it as task data. Worker
+  sessions are ephemeral; no transcript is saved or available to inspect/resume.
 - **Arg length:** at v1 defaults (`chunkTokens` 5 000 ≈ 20 KB) this is far under `ARG_MAX`
   (1 MB on macOS; per-arg 128 KB on Linux). A pathologically large `chunkTokens` could approach
   the Linux per-arg cap — a tuning concern, not a v1 risk.
 - env: `OM_WORKER=observer`, `OM_RUN_ID=<runId>`, `OM_RESULT_PATH=<abs .memory/.runs/<id>.result.json>`.
   No chunk file / `OM_CHUNK_PATH` — the chunk travels as the `-p` prompt.
-- `cwd` = master's `cwd` (so the worker session is recorded under the project path in the
-  **global** store `~/.pi/agent/sessions`, satisfying decision 11 — no `--session-dir`).
+- `cwd` = master's `cwd`; no session file is created.
 - Resolve the `pi` binary via `process.argv[1]` realpath (subagents' `resolvePiBinary` trick),
   falling back to `pi` on PATH.
 - Completion: the worker's terminal tool writes the result file then calls `ctx.shutdown()`;
@@ -363,8 +358,8 @@ Goal: bound the buffer and gain durable, navigable, cross-session topic files.
     must consolidate everything it was given (filing or discarding noise are both valid), so we
     trust it on clean exit. This guarantees the buffer always drains (a report-subset model
     would strand un-filed/junk observations in the buffer forever, breaking the bounded-buffer
-    invariant). A flaked-out partial run is recoverable from the worker's global session
-    recording and is the critic tier's job to catch (decision 2).
+    invariant). Worker transcripts are ephemeral; failed or incomplete runs are surfaced to the
+    master extension for retry.
 
 ### B3. Consolidator agent (`agent/consolidator/`) (L4)
 - `before_agent_start`: replace system prompt with the topic-routing prompt.

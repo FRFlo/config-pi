@@ -11,8 +11,9 @@ import { registerObserverTool } from "../agent/observer/tool.js";
 describe("launch argv + env", () => {
 	const model = { provider: "anthropic" as const, id: "claude-sonnet-4-6", thinking: "low" as const };
 
-	it("builds the headless yt-edit-style flag set", () => {
-		const argv = buildWorkerArgv({ model, sessionName: "om-observer-x", kickoffPrompt: "go" });
+	it("builds ephemeral headless workers without saving session history", () => {
+		const argv = buildWorkerArgv({ model, kickoffPrompt: "go" });
+		expect(argv).toContain("--no-session");
 		expect(argv).not.toContain("--no-extensions");
 		expect(argv).toContain("--no-builtin-tools");
 		expect(argv).toContain("--no-skills");
@@ -21,14 +22,14 @@ describe("launch argv + env", () => {
 		expect(argv[argv.indexOf("--model") + 1]).toBe("anthropic/claude-sonnet-4-6");
 		expect(argv[argv.indexOf("--thinking") + 1]).toBe("low");
 		expect(argv[argv.indexOf("-e") + 1]).toBe(AGENT_EXTENSION_PATH);
-		expect(argv[argv.indexOf("-n") + 1]).toBe("om-observer-x");
+		expect(argv).not.toContain("-n");
 		expect(argv).toContain("-p");
 		expect(argv).not.toContain("go");
 		expect(AGENT_EXTENSION_PATH.replace(/\\/g, "/").endsWith("/agent/index.ts")).toBe(true);
 	});
 
 	it("omits --thinking when no level is configured", () => {
-		const argv = buildWorkerArgv({ model: { provider: "x", id: "y" }, sessionName: "n", kickoffPrompt: "p" });
+		const argv = buildWorkerArgv({ model: { provider: "x", id: "y" }, kickoffPrompt: "p" });
 		expect(argv).not.toContain("--thinking");
 	});
 

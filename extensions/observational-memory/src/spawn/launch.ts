@@ -1,10 +1,7 @@
 /**
- * Subprocess worker launch — the yt-edit `pi -e <ext> -p` pattern (L2).
- *
- * NOT the subagents extension: that uses `--no-session --mode json`, which would defeat
- * decision 11's requirement that every worker be an ordinary recorded GLOBAL session. We
- * spawn a plain headless `pi` with no `--session-dir`, so the run is recorded under the
- * project path in `~/.pi/agent/sessions` and is openable in the session browser.
+ * Launch ephemeral, headless subprocess workers. Their output is handed back to the
+ * orchestrator through result files, so worker transcripts do not need to be persisted as
+ * sessions or clutter the session history.
  */
 import { spawn } from "node:child_process";
 import { mkdirSync, realpathSync } from "node:fs";
@@ -40,13 +37,11 @@ export function resolvePiBinary(): { command: string; baseArgs: string[] } {
 
 export function buildWorkerArgv(opts: {
 	model: ConfiguredModel;
-	sessionName: string;
 	/**
 	 * Kept in the type so callers construct the complete launch intent in one place.
 	 * The prompt is deliberately NOT appended to argv: on Windows, large observer chunks
 	 * can exceed CreateProcess' command-line limit and make spawn fail with ENAMETOOLONG.
-	 * spawnWorker pipes it through stdin instead; pi print mode records piped stdin as the
-	 * initial user message, preserving inspectable worker sessions without long argv.
+	 * spawnWorker pipes it through stdin instead, avoiding long argv.
 	 */
 	kickoffPrompt: string;
 	agentExtensionPath?: string;
@@ -54,6 +49,7 @@ export function buildWorkerArgv(opts: {
 	const pi = resolvePiBinary();
 	const args = [
 		...pi.baseArgs,
+		"--no-session",
 		"--no-skills",
 		"--no-prompt-templates",
 		"--no-context-files",
@@ -63,7 +59,6 @@ export function buildWorkerArgv(opts: {
 	];
 	if (opts.model.thinking) args.push("--thinking", opts.model.thinking);
 	args.push("-e", opts.agentExtensionPath ?? AGENT_EXTENSION_PATH);
-	args.push("-n", opts.sessionName);
 	args.push("-p");
 	return [pi.command, ...args];
 }
@@ -71,11 +66,9 @@ export function buildWorkerArgv(opts: {
 export type WorkerExit = { code: number | null; signal: NodeJS.Signals | null; stderr: string };
 
 /**
- * Spawn a headless worker; resolve when it exits. Workers run in their master session's
- * `.memory/<sessionId>/` root (not the project cwd) so pi keys the run into a distinct global
- * session bucket and it never clutters the project's `/resume` picker. The root is ensured to
- * exist before spawn — `spawn()` would ENOENT otherwise (the memory root is created lazily on
- * first durable write when there is no parent to seed).
+ * Spawn a headless, non-persisted worker; resolve when it exits. The root is ensured to exist
+ * before spawn — `spawn()` would ENOENT otherwise (the memory root is created lazily on first
+ * durable write when there is no parent to seed).
  */
 export function spawnWorker(opts: {
 	argv: string[];
@@ -128,8 +121,8 @@ export type ObserverLaunchEnv = {
 
 /**
  * Build the env a worker subprocess needs to write its result file. The chunk itself is NOT
- * passed via env/file — it is the `pi -p` prompt (recorded user message) so the run stays
- * faithfully inspectable on resume.
+ * passed via env/file — it is the `pi -p` prompt. Session persistence is disabled; results are
+ * handed back through the IPC files.
  */
 export function buildWorkerEnv(role: "observer" | "consolidator", opts: ObserverLaunchEnv): NodeJS.ProcessEnv {
 	return {

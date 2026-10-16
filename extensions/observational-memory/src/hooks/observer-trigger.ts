@@ -123,9 +123,8 @@ async function dispatchObserver(
 	runtime.status.workerStart("observer", runId);
 
 	try {
-		// The chunk IS the recorded user prompt (passed via `pi -p`), not an ephemeral
-		// context-hook injection. This keeps the observer session faithfully inspectable on
-		// resume — the whole point of running workers as recorded global sessions (decision 11).
+		// The chunk is passed as the `pi -p` prompt, not as an ephemeral context-hook injection.
+		// Worker sessions themselves are ephemeral; the result is persisted through IPC below.
 		// Prompt structure hardens the worker against being "captured" by the chunk. The chunk
 		// is delivered verbatim, but it is fenced as inert DATA, and the operative instruction is
 		// repeated AFTER the fence so recency keeps the model in observer-mode rather than
@@ -146,7 +145,6 @@ async function dispatchObserver(
 
 		const argv = buildWorkerArgv({
 			model: runtime.config.models.observer,
-			sessionName: `om-observer-${runId}`,
 			kickoffPrompt: userText,
 		});
 		const env = buildWorkerEnv("observer", { memoryRoot: runtime.memoryRoot, runId, backend: runtime.config.backend });

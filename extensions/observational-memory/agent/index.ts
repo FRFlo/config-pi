@@ -7,11 +7,9 @@
  * system prompt is fully replaced with the role prompt, and the role registers only the tools
  * it needs. Output is handed back to the orchestrator via the result file (see src/spawn/runs.ts).
  *
- * Chunk delivery: the orchestrator passes the conversation chunk as the `pi -p` prompt, so it
- * is recorded as a real user message. We deliberately do NOT inject it via the `context` hook
- * — that is non-destructive and never persists to the session, which would leave the chunk
- * invisible when inspecting/resuming the observer run and defeat the observability goal
- * (decision 11). The system prompt carries role + rules only.
+ * Chunk delivery: the orchestrator passes the conversation chunk as the `pi -p` prompt.
+ * Worker runs use --no-session; the system prompt carries role + rules only, and the result is
+ * handed back to the orchestrator through IPC rather than a saved transcript.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { trackWorkerCost } from "./cost.js";

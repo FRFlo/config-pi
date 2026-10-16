@@ -64,10 +64,9 @@ consolidator draining the oldest observations into durable per-session memory fi
   segments only once the file exceeds `journeyTargetTokens`, so recent history stays detailed
   and the section stays bounded. Like the topic files it does **not** roll back under `/tree`.
 
-Each worker is an **ordinary recorded pi session** in the global store
-(`~/.pi/agent/sessions`, under the project path) — open it in the session browser to see the
-exact input chunk, tool calls, and output. Transient handoff files live in
-`<project>/.memory/<sessionId>/.runs/`.
+Workers run with `--no-session` and do not appear in the session history. Their results are
+handed back through transient files in `<project>/.memory/<sessionId>/.runs/`; the master session
+retains the durable memory updates and any reported worker errors.
 
 ### Cost tracking
 
