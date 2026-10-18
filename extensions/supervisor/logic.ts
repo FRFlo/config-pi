@@ -2,6 +2,60 @@ import { isAbsolute, relative, resolve } from "node:path";
 
 export type PublicTask = { content: string; status: string; guidance?: string };
 export type PublicPhase = { name: string; tasks: PublicTask[] };
+export type SupervisorModel = { provider: string; id: string; thinking?: string };
+
+export const loadSupervisorModel = (sources: readonly unknown[]): SupervisorModel | undefined => {
+	const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+	const merged: Partial<SupervisorModel> = {};
+	for (const source of [...sources].reverse()) {
+		if (!source || typeof source !== "object") continue;
+		const section = (source as any).supervisor;
+		const model = section?.model;
+		if (typeof model?.provider === "string" && model.provider.trim())
+			merged.provider = model.provider.trim();
+		if (typeof model?.id === "string" && model.id.trim()) merged.id = model.id.trim();
+		if (thinkingLevels.includes(model?.thinking)) merged.thinking = model.thinking;
+	}
+	return merged.provider && merged.id ? (merged as SupervisorModel) : undefined;
+};
+
+export const newlyCompletedTrackedTasks = (
+	previous: readonly any[] | ReadonlyMap<string, string>,
+	current: readonly any[],
+	tracked: readonly any[],
+) => {
+	const flatten = (phases: readonly any[]) =>
+		phases.flatMap((phase) =>
+			(phase.tasks ?? []).map((task: any) => ({ phase: phase.name, task })),
+		);
+	const oldStatuses =
+		previous instanceof Map
+			? previous
+			: new Map(
+					flatten(previous).map(({ phase, task }) => [
+						`${phase}\u0000${task.content}`,
+						task.status,
+					]),
+				);
+	const trackedKeys = new Set(tracked.map((task) => task.content));
+	return flatten(current)
+		.filter(
+			({ phase, task }) =>
+				trackedKeys.has(task.content) &&
+				task.status === "completed" &&
+				oldStatuses.get(`${phase}\u0000${task.content}`) !== "completed",
+		)
+		.map(({ task }) => task);
+};
+export const snapshotTodoStatuses = (phases: readonly any[]) =>
+	new Map(
+		phases.flatMap((phase) =>
+			(phase.tasks ?? []).map((task: any) => [
+				`${phase.name}\u0000${task.content}`,
+				String(task.status ?? "pending"),
+			]),
+		),
+	);
 
 export const isPathWithinCwd = (cwd: string, target: string) => {
 	const base = resolve(cwd),
@@ -35,22 +89,6 @@ export const continuationPrompt = (tasks: readonly any[]) =>
 	tasks
 		.map((t) => `- [${t.status}] ${t.content}${t.guidance ? ` — Guidance: ${t.guidance}` : ""}`)
 		.join("\n");
-export const publicWorkerSteer = (
-	tasks: readonly any[],
-	hasDrift: boolean,
-	needsRationale: boolean,
-) => {
-	const pending = continuationPrompt(tasks);
-	return [
-		hasDrift ? "Keep the work within the public Todo scope; correct any out-of-scope changes." : "",
-		needsRationale
-			? "If a decision is not specified by the public Todo or guidance, briefly explain your rationale in the next progress update."
-			: "",
-		pending ? `Continue or correct these public Todo items:\n${pending}` : "",
-	]
-		.filter(Boolean)
-		.join("\n");
-};
 export const incompleteTasks = (phases: readonly any[]) =>
 	phases.flatMap((phase) =>
 		(phase.tasks ?? [])
@@ -76,16 +114,12 @@ export const reopenItems = (phases: any[], indexes: unknown[]) => {
 		}
 	return changed;
 };
-export const hasVerifiableProgress = (progress: unknown, evidence: unknown) =>
-	progress === true && typeof evidence === "string" && evidence.trim().length > 0;
 export const isCurrentReview = (
 	reviewGeneration: number,
 	currentGeneration: number,
 	reviewTask: unknown,
 	currentTask: unknown,
 ) => reviewGeneration === currentGeneration && reviewTask === currentTask;
-export const nextNoProgress = (cycles: number, hasVerifiableProgress: boolean) =>
-	hasVerifiableProgress ? 0 : cycles + 1;
 export const isEnabled = (read: () => string) => {
 	try {
 		return JSON.parse(read()).enabled !== false;
@@ -134,7 +168,7 @@ export const createPlan = (request: string) => {
 		content: titleFor(criterion),
 		status: "pending",
 		guidance: `Specific requirement: ${criterion}. Make a focused change satisfying this criterion and keep the Todo status current.`,
-		supervisorContext: `Private audit criterion ${i + 1}: inspect the relevant implementation and independent evidence. Confirm this exact requirement is met and scope is controlled; do not rely on worker self-certification.`,
+		supervisorContext: `Private audit criterion ${i + 1}: inspect the relevant implementation and independent evidence. Confirm this exact requirement is met; do not rely on worker self-certification.`,
 	}));
 	tasks.push({
 		content: "Verify Changes With Focused Project Checks",
@@ -145,31 +179,6 @@ export const createPlan = (request: string) => {
 	return [{ name: "Supervised plan", tasks }];
 };
 export const cloneTodo = (phases: readonly any[]) => JSON.parse(JSON.stringify(phases));
-export const todoChanges = (baseline: readonly any[], current: readonly any[]) => {
-	const flatten = (phases: readonly any[]) =>
-		phases.flatMap((phase: any) =>
-			(phase.tasks ?? []).map((task: any) => ({ phase: phase.name, task })),
-		);
-	const before = flatten(baseline),
-		after = flatten(current);
-	const key = (entry: any) => `${entry.phase}\u0000${entry.task.content}`;
-	const oldMap = new Map(before.map((entry) => [key(entry), entry.task]));
-	const newMap = new Map(after.map((entry) => [key(entry), entry.task]));
-	const removed = before
-		.filter((entry) => !newMap.has(key(entry)))
-		.map((entry) => ({ phase: entry.phase, ...entry.task }));
-	const added = after
-		.filter((entry) => !oldMap.has(key(entry)))
-		.map((entry) => ({ phase: entry.phase, ...entry.task }));
-	const changed = after
-		.filter(
-			(entry) =>
-				oldMap.has(key(entry)) &&
-				JSON.stringify(oldMap.get(key(entry))) !== JSON.stringify(entry.task),
-		)
-		.map((entry) => ({ phase: entry.phase, before: oldMap.get(key(entry)), after: entry.task }));
-	return { added, removed, changed };
-};
 export const resolveTrackedTasks = (phases: readonly any[], tracked: readonly any[]) => {
 	const all = phases.flatMap((phase: any) => phase.tasks ?? []);
 	return tracked.map((original) => {
@@ -194,15 +203,11 @@ export const restoreSupervisionFromTodo = (phases: any[], enabled: boolean) => {
 	return {
 		task: `Resume supervision from the current Todo:\n${objective}`,
 		tracked,
-		baseline: cloneTodo(phases),
-		todoUpdates: [],
 	};
 };
 export const freshRunState = () => ({
 	active: undefined as undefined,
 	pendingEvidence: [] as string[],
-	noProgress: 0,
-	stopped: false,
 	busy: false,
 });
 
@@ -230,44 +235,4 @@ export const appendRequestPlan = (phases: any[], request: string) => {
 		return { phases: next, tracked, added: true };
 	}
 	return { phases: [...phases, ...additions], tracked, added: true };
-};
-
-// No shell operators, substitutions, redirections, or compound commands. Tests/checks must be allowlisted explicitly.
-export const isAllowedVerificationCommand = (command: string, configuredScripts: string[] = []) => {
-	const cmd = command.trim();
-	if (
-		!cmd ||
-		/[;&|`$<>\n\r]/.test(cmd) ||
-		/\b(sudo|rm|mv|cp|curl|wget|git\s+(?!status|diff))\b/i.test(cmd)
-	)
-		return false;
-	if (
-		/^git status(?: --short)?$/.test(cmd) ||
-		/^git diff(?: --stat| --check)?$/.test(cmd) ||
-		/^git diff -- [\w./-]+$/.test(cmd)
-	)
-		return true;
-	const standard = [
-		"bun test",
-		"bun run test",
-		"bun run check",
-		"bun run typecheck",
-		"bun run lint",
-		"npm test",
-		"npm run test",
-		"npm run check",
-		"npm run typecheck",
-		"npm run lint",
-		"pnpm test",
-		"pnpm run test",
-		"pnpm run check",
-		"pnpm run typecheck",
-		"pnpm run lint",
-		"yarn test",
-		"yarn run test",
-		"yarn run check",
-		"yarn run typecheck",
-		"yarn run lint",
-	];
-	return standard.includes(cmd) || configuredScripts.includes(cmd);
 };

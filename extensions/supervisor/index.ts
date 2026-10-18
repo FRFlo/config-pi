@@ -1,27 +1,23 @@
 import { createNativeSubagent } from "../interactive-subagents/pi-extension/subagents/native-session.ts";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	appendRequestPlan,
-	cloneTodo,
 	freshRunState,
-	incompleteTasks,
-	hasVerifiableProgress,
-	isAllowedVerificationCommand,
+	newlyCompletedTrackedTasks,
 	isCurrentReview,
 	isEnabled,
 	isPathWithinCwd,
 	isRequirementFollowup,
-	nextNoProgress,
+	loadSupervisorModel,
 	persistEnabled,
 	publicTodoPrompt,
-	publicWorkerSteer,
 	restoreSupervisionFromTodo,
 	reopenItems,
 	resolveTrackedTasks,
 	shouldStart,
-	todoChanges,
+	snapshotTodoStatuses,
 } from "./logic.ts";
 
 const READ = "pi-todotools:supervisor-read";
@@ -44,17 +40,32 @@ const textOf = (v: any): string =>
 export default function supervisor(pi: any) {
 	let enabled = true;
 	let cwd = process.cwd();
-	let active:
-		| { task: string; tracked: Task[]; baseline: Phase[]; todoUpdates: string[] }
-		| undefined;
+	let active: { task: string; tracked: Task[] } | undefined;
 	let pendingEvidence: string[] = [];
-	let noProgress = 0;
-	let lastGuidance = "";
-	let stopped = false;
+	let reviewQueue: Task[] = [];
+	let followupQueue: Task[] = [];
+	let supervisorModel: any;
 	let busy = false;
 	let sessionGeneration = 0;
 	let privateSecrets: string[] = [];
 	let phases: Phase[] = [];
+	let todoStatuses = new Map<string, string>();
+	const readConfigFile = (path: string) => {
+		try {
+			return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : undefined;
+		} catch {
+			return undefined;
+		}
+	};
+	const loadModel = () => {
+		const agentDir = getAgentDir();
+		supervisorModel = loadSupervisorModel([
+			readConfigFile(join(cwd, ".pi", "preferences.json")),
+			readConfigFile(join(cwd, ".pi", "settings.json")),
+			readConfigFile(join(agentDir, "preferences.json")),
+			readConfigFile(join(agentDir, "settings.json")),
+		]);
+	};
 	const readTodo = () => {
 		const request: any = { requestId: `${Date.now()}-${Math.random()}` };
 		pi.events.emit(READ, request);
@@ -80,9 +91,8 @@ export default function supervisor(pi: any) {
 		if (!restored) return false;
 		active = restored;
 		pendingEvidence = [];
-		noProgress = 0;
-		lastGuidance = "";
-		stopped = false;
+		reviewQueue = [];
+		followupQueue = [];
 		busy = false;
 		return true;
 	};
@@ -91,39 +101,42 @@ export default function supervisor(pi: any) {
 		const fresh = freshRunState();
 		active = fresh.active;
 		pendingEvidence = fresh.pendingEvidence;
-		noProgress = fresh.noProgress;
-		stopped = fresh.stopped;
+		reviewQueue = [];
+		followupQueue = [];
 		busy = fresh.busy;
 		privateSecrets = [];
 		phases = [];
 		cwd = ctx.cwd;
-		enabled = true;
 		enabled = isEnabled(() => readFileSync(settingsPath(), "utf8"));
+		loadModel();
+		enabled = enabled && !!supervisorModel;
 		readTodo();
+		todoStatuses = snapshotTodoStatuses(phases);
 		if (enabled) restoreActiveFromCurrentTodo();
 		ctx.ui.setStatus(
 			"supervisor",
-			`Supervisor ${enabled ? "on" : "off"}${active ? " (resumed from Todo)" : ""}`,
+			`Supervisor ${enabled ? "on" : supervisorModel ? "off" : "off (model not configured)"}${active ? " (resumed from Todo)" : ""}`,
 		);
 	});
 	pi.events.on(READ, (payload: any) => {
 		if (enabled && payload && typeof payload.requestId === "string") payload.snapshot = { phases };
 	});
 	pi.events.on(UPDATED, (payload: any) => {
-		if (!enabled || !Array.isArray(payload?.phases)) return;
+		if (!Array.isArray(payload?.phases)) return;
+		const previous = todoStatuses;
 		phases = payload.phases;
+		todoStatuses = snapshotTodoStatuses(phases);
 		refreshSecrets(phases);
+		if (!enabled) return;
+		if (active) {
+			reviewQueue.push(...newlyCompletedTrackedTasks(previous, phases, active.tracked));
+			reviewQueue = [...new Map(reviewQueue.map((task) => [task.content, task])).values()];
+		}
 		if (!active) {
 			restoreActiveFromCurrentTodo();
 			return;
 		}
-		if (active) {
-			const changes = todoChanges(active.baseline, phases);
-			const summary = JSON.stringify(changes);
-			if (summary !== '{"added":[],"removed":[],"changed":[]}') active.todoUpdates.push(summary);
-			if (active.todoUpdates.length > 20) active.todoUpdates.shift();
-			active.tracked = resolveTrackedTasks(phases, active.tracked);
-		}
+		active.tracked = resolveTrackedTasks(phases, active.tracked);
 	});
 	pi.registerCommand("supervisor", {
 		description: "Enable, disable, or inspect supervision",
@@ -134,13 +147,16 @@ export default function supervisor(pi: any) {
 				enabled = op === "on";
 				active = undefined;
 				pendingEvidence = [];
-				noProgress = 0;
-				stopped = false;
+				reviewQueue = [];
+				followupQueue = [];
 				busy = false;
 				mkdirSync(getAgentDir(), { recursive: true });
 				persistEnabled((value) => writeFileSync(settingsPath(), value), enabled);
+				loadModel();
+				enabled = enabled && !!supervisorModel;
 				if (enabled) {
 					readTodo();
+					todoStatuses = snapshotTodoStatuses(phases);
 					restoreActiveFromCurrentTodo();
 				}
 				ctx.ui.setStatus(
@@ -148,13 +164,19 @@ export default function supervisor(pi: any) {
 					`Supervisor ${enabled ? "on" : "off"}${active ? " (resumed from Todo)" : ""}`,
 				);
 				ctx.ui.notify(
-					`Supervisor ${enabled ? (active ? "enabled and resumed from Todo" : "enabled") : "disabled"}`,
+					enabled
+						? active
+							? "Supervisor enabled and resumed from Todo."
+							: "Supervisor enabled."
+						: supervisorModel
+							? "Supervisor disabled."
+							: "Supervisor requires a model in the supervisor settings.",
 					"info",
 				);
 			} else {
 				readTodo();
 				ctx.ui.notify(
-					`Supervisor ${enabled ? "on" : "off"}; ${stopped ? "paused after 3 cycles without progress" : active ? "supervising active task" : "idle"}; ${phases.length} Todo phases`,
+					`Supervisor ${enabled ? "on" : "off"}; ${active ? "supervising Todo completions" : "idle"}; ${phases.length} Todo phases`,
 					"info",
 				);
 			}
@@ -172,20 +194,19 @@ export default function supervisor(pi: any) {
 			active.task = `${active.task}\nAdditional user requirement: ${text}`;
 			active.tracked = [...resolveTrackedTasks(phases, active.tracked), ...appended.tracked];
 			writeTodo(appended.phases);
-			stopped = false;
-			noProgress = 0;
 			pendingEvidence = [];
+			reviewQueue = [];
+			followupQueue = [];
 			ctx.ui.notify("Supervisor Todo updated with your additional requirement.", "info");
 			return;
 		}
 		if (!shouldStart(enabled, event.source, text)) return;
-		stopped = false;
-		noProgress = 0;
 		pendingEvidence = [];
-		const baseline = cloneTodo(phases);
+		reviewQueue = [];
+		followupQueue = [];
 		const appended = appendRequestPlan(phases, text);
 		if (!appended.added) return;
-		active = { task: text, tracked: appended.tracked, baseline, todoUpdates: [] };
+		active = { task: text, tracked: appended.tracked };
 		writeTodo(appended.phases);
 		ctx.ui.notify("Supervisor is observing this multi-step task.", "info");
 	});
@@ -212,6 +233,24 @@ export default function supervisor(pi: any) {
 		}
 		return value;
 	};
+	const reviewerGuard = (reviewCwd: string) => (reviewPi: any) => {
+		reviewPi.on("tool_call", (event: any) => {
+			if (!["read", "grep", "find", "ls"].includes(event?.toolName)) return;
+			const paths: string[] = [];
+			const collect = (value: any, key = "") => {
+				if (typeof value === "string" && /^(path|paths|cwd)$/i.test(key)) paths.push(value);
+				else if (Array.isArray(value)) value.forEach((item) => collect(item, key));
+				else if (value && typeof value === "object")
+					for (const [childKey, child] of Object.entries(value)) collect(child, childKey);
+			};
+			collect(event.input);
+			if (paths.some((path) => !isPathWithinCwd(reviewCwd, path)))
+				return {
+					block: true,
+					reason: "Reviewer filesystem access is restricted to the request repository cwd.",
+				};
+		});
+	};
 	pi.on("tool_call", (event: any) => {
 		if (!enabled || !event?.input) return;
 		const cleaned = scrubValue(event.input);
@@ -219,112 +258,62 @@ export default function supervisor(pi: any) {
 		Object.assign(event.input, cleaned);
 	});
 
-	const reviewerGuard = (reviewCwd: string) => (reviewPi: any) => {
-		reviewPi.on("tool_call", (event: any) => {
-			if (["read", "grep", "find", "ls"].includes(event?.toolName)) {
-				const paths: string[] = [];
-				const collect = (value: any, key = "") => {
-					if (typeof value === "string" && /^(path|paths|cwd)$/i.test(key)) paths.push(value);
-					else if (Array.isArray(value)) value.forEach((item) => collect(item, key));
-					else if (value && typeof value === "object")
-						for (const [childKey, child] of Object.entries(value)) collect(child, childKey);
-				};
-				collect(event.input);
-				if (paths.some((path) => !isPathWithinCwd(reviewCwd, path)))
-					return {
-						block: true,
-						reason: "Reviewer filesystem access is restricted to the request repository cwd.",
-					};
-				return;
-			}
-			if (event?.toolName !== "bash") return;
-			const command = String(event.input?.command ?? "");
-			let configured: string[] = [];
-			try {
-				const pkg = JSON.parse(readFileSync(join(reviewCwd, "package.json"), "utf8"));
-				for (const name of Object.keys(pkg.scripts ?? {})) {
-					if (!/^(test|check|typecheck|lint)(:[-\w]+)?$/.test(name)) continue;
-					for (const manager of ["bun", "npm", "pnpm", "yarn"])
-						configured.push(`${manager} run ${name}`);
-					if (name === "test")
-						for (const manager of ["npm", "pnpm", "yarn"]) configured.push(`${manager} test`);
-				}
-			} catch {
-				/* no configured project scripts */
-			}
-			if (!isAllowedVerificationCommand(command, configured))
-				return {
-					block: true,
-					reason:
-						"Supervisor bash is restricted to git status/diff and recognized/configured test or check commands.",
-				};
-		});
-	};
-
-	// Observe milestones/progress text and tool outcomes, but review once at agent_end to avoid per-token calls.
+	// Keep a small evidence window; reviews run only for completed or proof-pending Todo items.
 	pi.on("message_end", (event: any) => {
-		if (!enabled || !active || stopped || event?.message?.role !== "assistant") return;
-		const progress = textOf(event.message.content).trim();
-		if (progress)
-			pendingEvidence.push(
-				`assistant progress/milestone claim (unverified): ${progress.slice(0, 1000)}`,
-			);
-		if (pendingEvidence.length > 30) pendingEvidence.shift();
+		if (!enabled || !active || event?.message?.role !== "assistant") return;
+		const text = textOf(event.message.content).trim();
+		if (text) pendingEvidence.push(`agent: ${text.slice(0, 700)}`);
+		if (pendingEvidence.length > 8) pendingEvidence.shift();
 	});
 	pi.on("tool_result", (event: any) => {
 		if (!enabled) return;
 		const sanitized = scrubValue(event?.content ?? []);
-		if (active && !stopped) {
-			const detail = textOf(sanitized).slice(0, 1200);
+		if (active && (reviewQueue.length || followupQueue.length)) {
+			const detail = textOf(sanitized).slice(0, 700);
 			pendingEvidence.push(
-				`${event?.toolName ?? "tool"} ${event?.isError ? "ERROR" : "result"}; input=${JSON.stringify(scrubValue(event?.input ?? {})).slice(0, 500)}: ${detail}`,
+				`${event?.toolName ?? "tool"} ${event?.isError ? "ERROR" : "result"}: ${detail}`,
 			);
-			if (pendingEvidence.length > 30) pendingEvidence.shift();
+			if (pendingEvidence.length > 8) pendingEvidence.shift();
 		}
 		return { content: sanitized };
 	});
-	pi.on("agent_end", async (event: any, ctx: any) => {
-		if (!enabled || !active || stopped || busy) return;
+	pi.on("agent_end", async (_event: any, ctx: any) => {
+		if (!enabled || !active || busy || (!reviewQueue.length && !followupQueue.length)) return;
 		busy = true;
 		const reviewGeneration = sessionGeneration;
 		const reviewCwd = cwd;
 		const reviewTask = active;
 		const evidence = pendingEvidence.splice(0).join("\n");
-		const latestMessages = (event?.messages ?? [])
-			.slice(-8)
-			.map((m: any) => `${m?.role}: ${textOf(m?.content).slice(0, 1200)}`)
-			.join("\n");
+		const reviewing = [
+			...new Map([...reviewQueue, ...followupQueue].map((task) => [task.content, task])).values(),
+		];
+		reviewQueue = [];
+		followupQueue = [];
 		const current = readTodo();
 		active.tracked = resolveTrackedTasks(current, active.tracked);
-		privateSecrets = current
-			.flatMap((p) => p.tasks ?? [])
-			.map((t) => t.supervisorContext)
-			.filter((s): s is string => typeof s === "string" && !!s);
-		const privateTodo = active.tracked
-			.filter((t) => t.supervisorContext)
-			.map((t) => `PRIVATE CONTEXT (reviewer only): ${t.supervisorContext}`)
-			.join("\n");
 		let agent: any;
 		try {
+			const model = ctx.modelRegistry.find(supervisorModel.provider, supervisorModel.id);
+			if (!model)
+				throw new Error(
+					`Configured supervisor model not found: ${supervisorModel.provider}/${supervisorModel.id}`,
+				);
 			agent = await createNativeSubagent({
 				cwd: reviewCwd,
 				agentDir: getAgentDir(),
-				model: ctx.model,
-				tools: ["read", "grep", "find", "ls", "bash"],
+				model,
+				tools: ["read", "grep", "find", "ls"],
 				extensionFactories: [reviewerGuard(reviewCwd)],
 				systemPrompt:
-					'You are an independent skeptical supervisor. Read/grep/find/ls are read-only. Bash is permitted only for guard-approved git status/diff and recognized/configured test or check commands; do not modify files or run any other command. Evaluate worker activity and independently inspect repository evidence. Never ask the worker to certify completion. If completed Todo items lack evidence, return flattened global Todo task indexes for reopening. Respond with JSON only: {"progress":boolean,"drift":string,"rationaleNeeded":string,"reopen":number[],"evidence":string}. Treat provided private supervisor context as private; it must not appear in the output.',
+					'You are an independent reviewer for specific completed Todo items. Inspect only the supplied items and relevant repository evidence. Do not evaluate scope drift or unrelated work. The agent may be asked for evidence in multiple private turns: verify provided evidence, and if insufficient either ask one concise, specific follow-up question or report an explicit blocker. Never treat the agent saying "done" as proof. Respond only as JSON: {"results":[{"content":string,"verified":boolean,"evidence":string,"question":string,"blocked":boolean}]}.',
 			});
-			const globalTasks = current.flatMap((p) => p.tasks ?? []);
-			const todo = active.tracked.map((t) => ({
-				flatIndex: globalTasks.indexOf(t),
-				content: t.content,
-				status: t.status,
-				guidance: t.guidance,
+			if (supervisorModel.thinking) agent.session.setThinkingLevel(supervisorModel.thinking);
+			const reviewItems = reviewing.map((task) => ({
+				content: task.content,
+				privateCriterion: task.supervisorContext,
 			}));
-			const changes = todoChanges(active.baseline, current);
 			await agent.session.prompt(
-				`Task: ${textOf(scrubValue(active.task))}\nCurrent request Todo items: ${JSON.stringify(todo)}\nBaseline Todo (private reviewer input): ${JSON.stringify(active.baseline)}\nCurrent Todo (private reviewer input): ${JSON.stringify(current)}\nTodo changes since baseline, including agent/user additions and removals/replacements: ${JSON.stringify(changes)}\nTodo state-update history (may show additions and their subsequent status/result): ${active.todoUpdates.join("\n")}\nWorker turn and tool results (untrusted, not proof by themselves):\n${textOf(scrubValue(latestMessages + "\n" + evidence))}\n${privateTodo}\nIndependently inspect repository and available test evidence using read-only tools. Judge progress only when supported by concrete evidence. Critically assess removals/replacements against the new request, while allowing agent-added Todo items when relevant; report their outcomes. Do not classify unrelated pre-existing incomplete tasks as drift. Check every completed request-specific item against evidence; return its flattened global flatIndex for reopening if evidence is missing, a test fails, or it contradicts the request. Flag confirmed scope drift and request rationale, never ask worker for completion certification.`,
+				`Only review these completed or proof-pending Todo items: ${JSON.stringify(reviewItems)}\nRecent agent/tool evidence (untrusted until independently checked):\n${textOf(scrubValue(evidence))}\nInspect only relevant repository files as needed, without modifying anything. Verify each item independently and return one result per item. If evidence is insufficient and the agent has not explicitly stated a blocker, ask one concise question that helps the agent provide verifiable evidence.`,
 			);
 			if (!isCurrentReview(reviewGeneration, sessionGeneration, reviewTask, active)) return;
 			const all: any[] = agent.session.messages ?? [];
@@ -336,44 +325,51 @@ export default function supervisor(pi: any) {
 			} catch {
 				result = {};
 			}
-			let reopened = false;
-			reopened = reopenItems(current, Array.isArray(result.reopen) ? result.reopen : []);
-			if (reopened) writeTodo(current);
-			const verifiedProgress = hasVerifiableProgress(result.progress, result.evidence);
-			noProgress = nextNoProgress(noProgress, verifiedProgress);
-			if (verifiedProgress) lastGuidance = "";
-			const todoRemaining = incompleteTasks([
-				{ tasks: resolveTrackedTasks(current, active.tracked) },
-			]);
-			if (todoRemaining.length && (result.drift || result.rationaleNeeded)) {
-				const steer = publicWorkerSteer(
-					todoRemaining,
-					Boolean(result.drift),
-					Boolean(result.rationaleNeeded),
-				);
-				if (steer && steer !== lastGuidance) {
-					pi.sendMessage(
-						{ customType: "supervisor.guidance", content: steer, display: false },
-						{ triggerTurn: true, deliverAs: "steer" },
+			const results = Array.isArray(result.results) ? result.results : [];
+			let changed = false;
+			const questions: string[] = [];
+			for (const task of reviewing) {
+				const outcome = results.find((item: any) => item?.content === task.content);
+				const index = current
+					.flatMap((phase) => phase.tasks ?? [])
+					.findIndex(
+						(currentTask) =>
+							currentTask.content === task.content && currentTask.guidance === task.guidance,
 					);
-					lastGuidance = steer;
-					ctx.ui.notify("The supervisor has redirected the agent.", "info");
+				if (!outcome?.verified && index >= 0) {
+					changed = reopenItems(current, [index]) || changed;
+					const question =
+						typeof outcome?.question === "string" && outcome.question.trim()
+							? outcome.question.trim()
+							: outcome?.blocked
+								? ""
+								: `Please provide concise, verifiable evidence for the completed Todo: ${task.content}.`;
+					if (question && !outcome?.blocked) {
+						followupQueue.push(task);
+						questions.push(`For Todo "${task.content}": ${question}`);
+					}
 				}
 			}
-			if (active.tracked.every((t) => t.status === "completed")) {
-				ctx.ui.notify(
-					"All request-specific Todo items are marked complete; independent review is observational and not a full certification.",
-					"info",
+			if (changed) writeTodo(current);
+			if (questions.length) {
+				pi.sendMessage(
+					{
+						customType: "supervisor.evidence-request",
+						content: `Please respond to the supervisor's evidence requests, then continue the remaining Todo work:\n${questions.join("\n")}`,
+						display: false,
+					},
+					{ triggerTurn: true, deliverAs: "steer" },
 				);
-				active = undefined;
+				ctx.ui.notify("The supervisor has requested additional evidence.", "info");
 			}
-		} catch (error) {
+			if (active.tracked.every((t) => t.status === "completed")) {
+				active = undefined;
+				reviewQueue = [];
+				followupQueue = [];
+			}
+		} catch {
 			if (isCurrentReview(reviewGeneration, sessionGeneration, reviewTask, active)) {
-				noProgress = nextNoProgress(noProgress, false);
-				ctx.ui.notify(
-					`Supervisor review failed; supervision will continue: ${String(error)}`,
-					"warning",
-				);
+				reviewQueue.push(...reviewing);
 			}
 		} finally {
 			agent?.dispose();

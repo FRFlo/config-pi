@@ -7,22 +7,20 @@ import {
 	freshRunState,
 	gated,
 	incompleteTasks,
-	isAllowedVerificationCommand,
 	isCurrentReview,
 	isEnabled,
 	isPathWithinCwd,
 	isRequirementFollowup,
-	hasVerifiableProgress,
-	nextNoProgress,
+	loadSupervisorModel,
+	newlyCompletedTrackedTasks,
+	snapshotTodoStatuses,
 	persistEnabled,
 	publicTodoPrompt,
-	publicWorkerSteer,
 	renderPublicTodo,
 	reopenItems,
 	resolveTrackedTasks,
 	restoreSupervisionFromTodo,
 	shouldStart,
-	todoChanges,
 } from "./logic.ts";
 
 describe("supervisor policy", () => {
@@ -166,40 +164,52 @@ describe("supervisor policy", () => {
 		expect(fresh.phases).toHaveLength(2);
 		expect(fresh.phases[0].tasks[0].content).toBe("Finished");
 	});
-	it("distinguishes follow-up requirements from acknowledgments and avoids private reviewer text in steers", () => {
+	it("distinguishes follow-up requirements from acknowledgments", () => {
 		expect(isRequirementFollowup("Thanks, okay.")).toBe(false);
 		expect(isRequirementFollowup("Also preserve the keyboard shortcut")).toBe(true);
-		const steer = publicWorkerSteer(
-			[
-				{
-					content: "Preserve keyboard shortcuts within requested scope",
-					status: "pending",
-					guidance: "Keep compatibility",
-				},
-			],
-			true,
-			true,
-		);
-		expect(steer).toContain("Preserve keyboard shortcuts");
-		expect(steer).not.toContain("supervisorContext");
-		expect(steer).not.toContain("private reviewer");
 	});
-	it("compares baseline and current Todo for removals, replacements and agent additions", () => {
-		const baseline = [
+	it("queues only newly completed tracked Todo items", () => {
+		const previous = [
 			{
 				name: "Phase",
-				tasks: [{ content: "Old", status: "pending", supervisorContext: "private" }],
+				tasks: [
+					{ content: "Done before", status: "completed" },
+					{ content: "Target", status: "in_progress" },
+					{ content: "Untracked", status: "in_progress" },
+				],
 			},
 		];
-		const current = [
+		const next = [
 			{
 				name: "Phase",
-				tasks: [{ content: "Agent-added", status: "completed", guidance: "agent result" }],
+				tasks: [
+					{ content: "Done before", status: "completed" },
+					{ content: "Target", status: "completed" },
+					{ content: "Untracked", status: "completed" },
+				],
 			},
 		];
-		const changes = todoChanges(baseline, current);
-		expect(changes.removed).toHaveLength(1);
-		expect(changes.added[0].content).toBe("Agent-added");
+		expect(newlyCompletedTrackedTasks(previous, next, [{ content: "Target" }])).toEqual([
+			next[0].tasks[1],
+		]);
+		expect(newlyCompletedTrackedTasks(next, next, [{ content: "Target" }])).toEqual([]);
+		const snapshot = snapshotTodoStatuses(previous);
+		previous[0].tasks[1].status = "completed";
+		expect(newlyCompletedTrackedTasks(snapshot, next, [{ content: "Target" }])).toEqual([
+			next[0].tasks[1],
+		]);
+	});
+	it("loads and overlays a configured reviewer model", () => {
+		expect(
+			loadSupervisorModel([
+				{ supervisor: { model: { id: "project-reviewer", thinking: "low" } } },
+				{ supervisor: { model: { provider: "global", id: "global-reviewer" } } },
+			]),
+		).toEqual({ provider: "global", id: "project-reviewer", thinking: "low" });
+		expect(
+			loadSupervisorModel([{ observationalMemory: { model: { provider: "x", id: "y" } } }]),
+		).toBeUndefined();
+		expect(loadSupervisorModel([{ supervisor: { model: { provider: "x" } } }])).toBeUndefined();
 	});
 	it("restricts reviewer filesystem paths to cwd and descendants", () => {
 		expect(isPathWithinCwd("C:/repo", "src/file.ts")).toBe(true);
@@ -207,7 +217,7 @@ describe("supervisor policy", () => {
 		expect(isPathWithinCwd("C:/repo", "../outside/secret.txt")).toBe(false);
 		expect(isPathWithinCwd("C:/repo", "C:/other/secret.txt")).toBe(false);
 	});
-	it("restores supervision from incomplete current Todo and rebuilds a fresh baseline", () => {
+	it("restores supervision from incomplete current Todo", () => {
 		const current = [
 			{
 				name: "Current branch",
@@ -227,11 +237,8 @@ describe("supervisor policy", () => {
 		expect(restored.tracked[0]).toBe(current[0].tasks[0]);
 		expect(restored.tracked[1]).toBe(current[0].tasks[1]);
 		expect(restored.tracked[1].status).toBe("completed");
-		expect(restored.baseline).toEqual(current);
-		expect(restored.baseline).not.toBe(current);
 		expect(restored.task).toContain("Use the current requirement");
 		expect(restored.task).not.toContain("current private audit details");
-		expect(restored.todoUpdates).toEqual([]);
 		expect(restoreSupervisionFromTodo(current, false)).toBeUndefined();
 	});
 	it("does not restore supervision when the current Todo has no incomplete tasks", () => {
@@ -247,8 +254,6 @@ describe("supervisor policy", () => {
 		expect(freshRunState()).toEqual({
 			active: undefined,
 			pendingEvidence: [],
-			noProgress: 0,
-			stopped: false,
 			busy: false,
 		});
 	});
@@ -264,29 +269,11 @@ describe("supervisor policy", () => {
 		);
 		expect(resolved[0]).toBe(updated);
 	});
-	it("rejects non-string completion evidence safely", () => {
-		expect(hasVerifiableProgress(true, "test passed")).toBe(true);
-		expect(hasVerifiableProgress(true, undefined)).toBe(false);
-		expect(hasVerifiableProgress(true, { trim: "not callable" })).toBe(false);
-	});
-	it("counts current reviewer errors and ignores stale session/task errors", () => {
+	it("ignores stale review results", () => {
 		const active = {};
 		expect(isCurrentReview(4, 4, active, active)).toBe(true);
 		expect(isCurrentReview(3, 4, active, active)).toBe(false);
 		expect(isCurrentReview(4, 4, active, {})).toBe(false);
-		let failures = 0;
-		failures = nextNoProgress(failures, false);
-		failures = nextNoProgress(failures, false);
-		failures = nextNoProgress(failures, false);
-		expect(failures).toBe(3);
-	});
-	it("stops after three cycles without verifiable progress", () => {
-		let cycles = 0;
-		cycles = nextNoProgress(cycles, false);
-		cycles = nextNoProgress(cycles, false);
-		cycles = nextNoProgress(cycles, false);
-		expect(cycles).toBe(3);
-		expect(nextNoProgress(cycles, true)).toBe(0);
 	});
 	it("persists and restores global toggle, defaulting on when absent", () => {
 		let stored = "";
@@ -299,14 +286,5 @@ describe("supervisor policy", () => {
 			stored = value;
 		}, true);
 		expect(isEnabled(() => stored)).toBe(true);
-	});
-	it("allows only safe git inspections and standard/configured verification commands", () => {
-		expect(isAllowedVerificationCommand("git diff --check")).toBe(true);
-		expect(isAllowedVerificationCommand("bun run check")).toBe(true);
-		expect(isAllowedVerificationCommand("bun run custom-check", ["bun run custom-check"])).toBe(
-			true,
-		);
-		expect(isAllowedVerificationCommand("git status; rm -rf .")).toBe(false);
-		expect(isAllowedVerificationCommand("node arbitrary.js")).toBe(false);
 	});
 });
