@@ -21,6 +21,7 @@
 [submodule "git/github.com/FRFlo/pi-mcp-adapter"]
 	path = git/github.com/FRFlo/pi-mcp-adapter
 	url = https://github.com/FRFlo/pi-mcp-adapter.git
+	branch = feat/pi-executor-client-bridge
 [submodule "git/github.com/FRFlo/pi-executor"]
 	path = git/github.com/FRFlo/pi-executor
 	url = https://github.com/FRFlo/pi-executor.git
