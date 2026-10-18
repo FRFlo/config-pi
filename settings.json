@@ -11,8 +11,7 @@
     "git:github.com/FRFlo/pi-quotas",
     "npm:pi-antigravity",
     "npm:@posthog/pi",
-    "npm:pi-lsp",
-    "git:github.com/FRFlo/pi-mcp-adapter"
+    "npm:pi-lsp"
   ],
   "observational-memory": {
     "backend": "sqlite",

@@ -3,8 +3,8 @@ import path from "node:path";
 import process from "node:process";
 
 /**
- * Idempotent patcher for @earendil-works/pi-coding-agent, @earendil-works/pi-tui,
- * and pi-mcp-adapter to prevent crashes on missing .invalidate() methods.
+ * Idempotent patcher for @earendil-works/pi-coding-agent and @earendil-works/pi-tui
+ * to prevent crashes on missing .invalidate() methods.
  */
 function patchFile(filePath, replacements) {
   if (!fs.existsSync(filePath)) {
@@ -112,15 +112,6 @@ export function runPatches() {
       }
     }
   }
-
-  // 5. Patch pi-mcp-adapter tool-result-renderer.ts
-  const mcpRendererTs = path.join(piAgentDir, "npm", "node_modules", "pi-mcp-adapter", "tool-result-renderer.ts");
-  patchFile(mcpRendererTs, [
-    {
-      oldText: "  const hasErrorDetails = Boolean(result.details.error);",
-      newText: "  const hasErrorDetails = Boolean(result.details?.error);",
-    },
-  ]);
 }
 
 if (import.meta.url === `file:///${process.argv[1].replace(/\\/g, "/")}`) {
