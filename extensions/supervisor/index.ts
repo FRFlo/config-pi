@@ -49,6 +49,7 @@ export default function supervisor(pi: any) {
 		| undefined;
 	let pendingEvidence: string[] = [];
 	let noProgress = 0;
+	let lastGuidance = "";
 	let stopped = false;
 	let busy = false;
 	let sessionGeneration = 0;
@@ -80,6 +81,7 @@ export default function supervisor(pi: any) {
 		active = restored;
 		pendingEvidence = [];
 		noProgress = 0;
+		lastGuidance = "";
 		stopped = false;
 		busy = false;
 		return true;
@@ -339,43 +341,24 @@ export default function supervisor(pi: any) {
 			if (reopened) writeTodo(current);
 			const verifiedProgress = hasVerifiableProgress(result.progress, result.evidence);
 			noProgress = nextNoProgress(noProgress, verifiedProgress);
-			const alert = [
-				result.drift && `Drift: ${result.drift}`,
-				result.rationaleNeeded && `Rationale needed: ${result.rationaleNeeded}`,
-				reopened && "Todo reopened: completion evidence was insufficient.",
-				result.evidence && `Evidence: ${result.evidence}`,
-			]
-				.filter(Boolean)
-				.join("\n");
-			if (noProgress >= 3) {
-				stopped = true;
-				ctx.ui.setStatus("supervisor", "Supervisor paused");
-				ctx.ui.notify(
-					"Supervisor paused after 3 consecutive cycles without verifiable progress; control returned to you.",
-					"warning",
-				);
-			}
+			if (verifiedProgress) lastGuidance = "";
 			const todoRemaining = incompleteTasks([
 				{ tasks: resolveTrackedTasks(current, active.tracked) },
 			]);
-			if (todoRemaining.length && noProgress < 3) {
+			if (todoRemaining.length && (result.drift || result.rationaleNeeded)) {
 				const steer = publicWorkerSteer(
 					todoRemaining,
 					Boolean(result.drift),
 					Boolean(result.rationaleNeeded),
 				);
-				if (steer)
-					pi.sendUserMessage(`Supervisor observation (not a completion request):\n${steer}`, {
-						deliverAs: "steer",
-					});
-			}
-			if (alert) {
-				// This is user-only UI, so private Todo context may be shown to the human.
-				const visible = alert.slice(0, 1000);
-				ctx.ui.notify(
-					`Supervisor review (not a completion guarantee): ${visible}`,
-					result.drift ? "warning" : "info",
-				);
+				if (steer && steer !== lastGuidance) {
+					pi.sendMessage(
+						{ customType: "supervisor.guidance", content: steer, display: false },
+						{ triggerTurn: true, deliverAs: "steer" },
+					);
+					lastGuidance = steer;
+					ctx.ui.notify("The supervisor has redirected the agent.", "info");
+				}
 			}
 			if (active.tracked.every((t) => t.status === "completed")) {
 				ctx.ui.notify(
@@ -387,19 +370,10 @@ export default function supervisor(pi: any) {
 		} catch (error) {
 			if (isCurrentReview(reviewGeneration, sessionGeneration, reviewTask, active)) {
 				noProgress = nextNoProgress(noProgress, false);
-				if (noProgress >= 3) {
-					stopped = true;
-					ctx.ui.setStatus("supervisor", "Supervisor paused");
-					ctx.ui.notify(
-						"Supervisor paused after 3 consecutive review failures without verifiable progress; control returned to you.",
-						"warning",
-					);
-				} else {
-					ctx.ui.notify(
-						`Supervisor review failed (${noProgress}/3); task is not independently verified: ${String(error)}`,
-						"warning",
-					);
-				}
+				ctx.ui.notify(
+					`Supervisor review failed; supervision will continue: ${String(error)}`,
+					"warning",
+				);
 			}
 		} finally {
 			agent?.dispose();
