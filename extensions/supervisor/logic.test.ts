@@ -7,8 +7,8 @@ import {
 	freshRunState,
 	gated,
 	incompleteTasks,
+	isEnabledForSession,
 	isCurrentReview,
-	isEnabled,
 	isPathWithinCwd,
 	isRequirementFollowup,
 	isSupervisorCommand,
@@ -16,7 +16,6 @@ import {
 	loadSupervisorModel,
 	newlyCompletedTrackedTasks,
 	snapshotTodoStatuses,
-	persistEnabled,
 	publicTodoPrompt,
 	renderPublicTodo,
 	requiresCheckpointFollowup,
@@ -299,16 +298,24 @@ describe("supervisor policy", () => {
 		expect(isCurrentReview(3, 4, active, active)).toBe(false);
 		expect(isCurrentReview(4, 4, active, {})).toBe(false);
 	});
-	it("persists and restores global toggle, defaulting on when absent", () => {
-		let stored = "";
-		expect(isEnabled(() => stored)).toBe(true);
-		persistEnabled((value) => {
-			stored = value;
-		}, false);
-		expect(isEnabled(() => stored)).toBe(false);
-		persistEnabled((value) => {
-			stored = value;
-		}, true);
-		expect(isEnabled(() => stored)).toBe(true);
+	it("restores the latest session toggle and defaults disabled", () => {
+		expect(isEnabledForSession([])).toBe(false);
+		expect(
+			isEnabledForSession([
+				{ type: "custom", customType: "supervisor.enabled", data: { enabled: true } },
+				{ type: "custom", customType: "other.extension", data: { enabled: false } },
+			]),
+		).toBe(true);
+		expect(
+			isEnabledForSession([
+				{ type: "custom", customType: "supervisor.enabled", data: { enabled: true } },
+				{ type: "custom", customType: "supervisor.enabled", data: { enabled: false } },
+			]),
+		).toBe(false);
+		expect(
+			isEnabledForSession([
+				{ type: "custom", customType: "supervisor.enabled", data: { enabled: "true" } },
+			]),
+		).toBe(false);
 	});
 });

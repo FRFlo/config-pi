@@ -1,18 +1,17 @@
 import { createNativeSubagent } from "../interactive-subagents/pi-extension/subagents/native-session.ts";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	appendRequestPlan,
 	freshRunState,
+	isEnabledForSession,
 	newlyCompletedTrackedTasks,
 	isCurrentReview,
-	isEnabled,
 	isPathWithinCwd,
 	isRequirementFollowup,
 	loadSupervisorModel,
 	latestUserRequest,
-	persistEnabled,
 	publicTodoPrompt,
 	requiresCheckpointFollowup,
 	restoreSupervisionFromTodo,
@@ -25,6 +24,7 @@ import {
 const READ = "pi-todotools:supervisor-read";
 const WRITE = "pi-todotools:supervisor-write";
 const UPDATED = "pi-todotools:state-updated";
+const ENABLED_ENTRY = "supervisor.enabled";
 type Task = {
 	content: string;
 	status: "pending" | "in_progress" | "completed";
@@ -33,14 +33,13 @@ type Task = {
 	[key: string]: any;
 };
 type Phase = { name: string; tasks: Task[]; [key: string]: any };
-const settingsPath = () => join(getAgentDir(), "supervisor.json");
 const textOf = (v: any): string =>
 	Array.isArray(v)
 		? v.map((x) => (typeof x === "string" ? x : (x?.text ?? ""))).join("\n")
 		: String(v ?? "");
 
 export default function supervisor(pi: any) {
-	let enabled = true;
+	let enabled = false;
 	let cwd = process.cwd();
 	let active: { task: string; tracked: Task[] } | undefined;
 	let pendingEvidence: string[] = [];
@@ -156,7 +155,7 @@ export default function supervisor(pi: any) {
 		privateSecrets = [];
 		phases = [];
 		cwd = ctx.cwd;
-		enabled = isEnabled(() => readFileSync(settingsPath(), "utf8"));
+		enabled = isEnabledForSession(ctx.sessionManager.getEntries());
 		loadModel();
 		enabled = enabled && !!supervisorModel;
 		readTodo();
@@ -199,10 +198,9 @@ export default function supervisor(pi: any) {
 				reviewQueue = [];
 				followupQueue = [];
 				busy = false;
-				mkdirSync(getAgentDir(), { recursive: true });
-				persistEnabled((value) => writeFileSync(settingsPath(), value), enabled);
 				loadModel();
 				enabled = enabled && !!supervisorModel;
+				pi.appendEntry(ENABLED_ENTRY, { enabled });
 				if (enabled) {
 					readTodo();
 					todoStatuses = snapshotTodoStatuses(phases);

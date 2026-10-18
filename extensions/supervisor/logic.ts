@@ -122,15 +122,15 @@ export const isCurrentReview = (
 ) => reviewGeneration === currentGeneration && reviewTask === currentTask;
 export const requiresCheckpointFollowup = (result: any) =>
 	result?.verified !== true || result?.scopeAligned === false;
-export const isEnabled = (read: () => string) => {
-	try {
-		return JSON.parse(read()).enabled !== false;
-	} catch {
-		return true;
-	}
+export const isEnabledForSession = (entries: readonly any[]) => {
+	let enabled = false;
+	for (const entry of entries)
+		if (entry?.type === "custom" && entry.customType === "supervisor.enabled") {
+			const value = entry.data?.enabled;
+			if (typeof value === "boolean") enabled = value;
+		}
+	return enabled;
 };
-export const persistEnabled = (write: (value: string) => void, enabled: boolean) =>
-	write(JSON.stringify({ enabled }, null, 2));
 export const shouldStart = (enabled: boolean, source: string | undefined, text: string) =>
 	enabled && source !== "extension" && gated(text);
 export const isSupervisorCommand = (text: string) => /^\/supervisor(?:\s|$)/i.test(text.trim());
