@@ -12,6 +12,7 @@ models-store.json
 .memory/
 .senpi/
 sessions/
+subagent-sessions/
 mcp-cache.json
 mcp-npx-cache.json
 run-history.jsonl
