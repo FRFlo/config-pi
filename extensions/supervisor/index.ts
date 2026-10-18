@@ -11,8 +11,10 @@ import {
 	isPathWithinCwd,
 	isRequirementFollowup,
 	loadSupervisorModel,
+	latestUserRequest,
 	persistEnabled,
 	publicTodoPrompt,
+	requiresCheckpointFollowup,
 	restoreSupervisionFromTodo,
 	reopenItems,
 	resolveTrackedTasks,
@@ -65,6 +67,53 @@ export default function supervisor(pi: any) {
 			readConfigFile(join(agentDir, "preferences.json")),
 			readConfigFile(join(agentDir, "settings.json")),
 		]);
+	};
+	const frameRequest = async (request: string, ctx: any) => {
+		const fallback = appendRequestPlan([], request);
+		try {
+			const model = ctx.modelRegistry.find(supervisorModel.provider, supervisorModel.id);
+			if (!model) return fallback;
+			const planner = await createNativeSubagent({
+				cwd,
+				agentDir: getAgentDir(),
+				model,
+				tools: [],
+				systemPrompt:
+					'You are the supervisor planning a user-requested task. Convert the exact user request into a concise Todo plan and explicit verification checkpoints. Do not expand scope or invent requirements. Return only JSON: {"items":[{"content":"5-10 word task title","guidance":"worker instruction","criterion":"private independently verifiable acceptance criterion"}]}. Include all distinct requirements and a final focused verification task.',
+			});
+			try {
+				if (supervisorModel.thinking) planner.session.setThinkingLevel(supervisorModel.thinking);
+				await planner.session.prompt(
+					`User request to plan:\n${request}\n\nCreate sequential Todo items with a private verification criterion for each. Keep the plan limited to this request.`,
+				);
+				const messages: any[] = planner.session.messages ?? [];
+				const output = textOf(
+					[...messages].reverse().find((message) => message?.role === "assistant")?.content,
+				);
+				const match = output.match(/\{[\s\S]*\}/);
+				const parsed = match ? JSON.parse(match[0]) : {};
+				const items = Array.isArray(parsed.items) ? parsed.items : [];
+				if (
+					!items.length ||
+					items.some((item: any) => typeof item?.content !== "string" || !item.content.trim())
+				)
+					return fallback;
+				const tasks = items.slice(0, 8).map((item: any) => ({
+					content: item.content.trim(),
+					status: "pending",
+					guidance: typeof item.guidance === "string" ? item.guidance : "",
+					supervisorContext:
+						typeof item.criterion === "string"
+							? item.criterion
+							: `Verify this requirement against the user request: ${request}`,
+				}));
+				return { phases: [{ name: "Supervised plan", tasks }], tracked: tasks, added: true };
+			} finally {
+				planner.dispose();
+			}
+		} catch {
+			return fallback;
+		}
 	};
 	const readTodo = () => {
 		const request: any = { requestId: `${Date.now()}-${Math.random()}` };
@@ -157,7 +206,23 @@ export default function supervisor(pi: any) {
 				if (enabled) {
 					readTodo();
 					todoStatuses = snapshotTodoStatuses(phases);
-					restoreActiveFromCurrentTodo();
+					if (!restoreActiveFromCurrentTodo()) {
+						const request = latestUserRequest(ctx.sessionManager?.getBranch?.() ?? []);
+						if (request) {
+							const framed = await frameRequest(request, ctx);
+							active = { task: request, tracked: framed.tracked };
+							writeTodo([...phases, ...framed.phases]);
+							pi.sendMessage(
+								{
+									customType: "supervisor.plan-ready",
+									content:
+										"The supervisor has prepared the Todo and verification checkpoints for the current user request. Continue the requested work while following that plan.",
+									display: false,
+								},
+								{ triggerTurn: true, deliverAs: "steer" },
+							);
+						}
+					}
 				}
 				ctx.ui.setStatus(
 					"supervisor",
@@ -167,7 +232,7 @@ export default function supervisor(pi: any) {
 					enabled
 						? active
 							? "Supervisor enabled and resumed from Todo."
-							: "Supervisor enabled."
+							: "Supervisor enabled; waiting for a user request to frame."
 						: supervisorModel
 							? "Supervisor disabled."
 							: "Supervisor requires a model in the supervisor settings.",
@@ -184,7 +249,7 @@ export default function supervisor(pi: any) {
 	});
 
 	// Starting a gated task creates a worker-visible plan only through the public Todo bridge.
-	pi.on("input", (event: any, ctx: any) => {
+	pi.on("input", async (event: any, ctx: any) => {
 		if (typeof event?.text !== "string" || !enabled || event.source === "extension") return;
 		const text = event.text;
 		readTodo();
@@ -204,10 +269,10 @@ export default function supervisor(pi: any) {
 		pendingEvidence = [];
 		reviewQueue = [];
 		followupQueue = [];
-		const appended = appendRequestPlan(phases, text);
+		const appended = await frameRequest(text, ctx);
 		if (!appended.added) return;
 		active = { task: text, tracked: appended.tracked };
-		writeTodo(appended.phases);
+		writeTodo([...phases, ...appended.phases]);
 		ctx.ui.notify("Supervisor is observing this multi-step task.", "info");
 	});
 
@@ -305,7 +370,7 @@ export default function supervisor(pi: any) {
 				tools: ["read", "grep", "find", "ls"],
 				extensionFactories: [reviewerGuard(reviewCwd)],
 				systemPrompt:
-					'You are an independent reviewer for specific completed Todo items. Inspect only the supplied items and relevant repository evidence. Do not evaluate scope drift or unrelated work. The agent may be asked for evidence in multiple private turns: verify provided evidence, and if insufficient either ask one concise, specific follow-up question or report an explicit blocker. Never treat the agent saying "done" as proof. Respond only as JSON: {"results":[{"content":string,"verified":boolean,"evidence":string,"question":string,"blocked":boolean}]}.',
+					'You are an independent supervisor reviewing planned checkpoints. Inspect only the supplied completed Todo items and relevant repository evidence. Verify the item against its private acceptance criterion and the original user request; flag changes that materially exceed or conflict with the requested scope. The agent may be asked for evidence in multiple private turns: if evidence is insufficient or scope alignment is uncertain, ask one concise, specific follow-up question or report an explicit blocker. Never treat the agent saying "done" as proof. Respond only as JSON: {"results":[{"content":string,"verified":boolean,"scopeAligned":boolean,"drift":string,"evidence":string,"question":string,"blocked":boolean}]}.',
 			});
 			if (supervisorModel.thinking) agent.session.setThinkingLevel(supervisorModel.thinking);
 			const reviewItems = reviewing.map((task) => ({
@@ -313,7 +378,7 @@ export default function supervisor(pi: any) {
 				privateCriterion: task.supervisorContext,
 			}));
 			await agent.session.prompt(
-				`Only review these completed or proof-pending Todo items: ${JSON.stringify(reviewItems)}\nRecent agent/tool evidence (untrusted until independently checked):\n${textOf(scrubValue(evidence))}\nInspect only relevant repository files as needed, without modifying anything. Verify each item independently and return one result per item. If evidence is insufficient and the agent has not explicitly stated a blocker, ask one concise question that helps the agent provide verifiable evidence.`,
+				`Original user request: ${textOf(scrubValue(reviewTask.task))}\nReview only these completed or proof-pending Todo items at this checkpoint: ${JSON.stringify(reviewItems)}\nRecent agent/tool evidence (untrusted until independently checked):\n${textOf(scrubValue(evidence))}\nInspect only relevant repository files as needed, without modifying anything. For each item, verify the criterion and whether the change remains aligned with the original request; identify material unrelated scope. If evidence is insufficient or alignment cannot be established and the agent has not explicitly stated a blocker, ask one concise question for evidence or rationale.`,
 			);
 			if (!isCurrentReview(reviewGeneration, sessionGeneration, reviewTask, active)) return;
 			const all: any[] = agent.session.messages ?? [];
@@ -336,14 +401,16 @@ export default function supervisor(pi: any) {
 						(currentTask) =>
 							currentTask.content === task.content && currentTask.guidance === task.guidance,
 					);
-				if (!outcome?.verified && index >= 0) {
+				if (requiresCheckpointFollowup(outcome) && index >= 0) {
 					changed = reopenItems(current, [index]) || changed;
 					const question =
 						typeof outcome?.question === "string" && outcome.question.trim()
 							? outcome.question.trim()
-							: outcome?.blocked
-								? ""
-								: `Please provide concise, verifiable evidence for the completed Todo: ${task.content}.`;
+							: typeof outcome?.drift === "string" && outcome.drift.trim()
+								? `Please explain or correct this scope concern: ${outcome.drift.trim()}`
+								: outcome?.blocked
+									? ""
+									: `Please provide concise, verifiable evidence for the completed Todo: ${task.content}.`;
 					if (question && !outcome?.blocked) {
 						followupQueue.push(task);
 						questions.push(`For Todo "${task.content}": ${question}`);

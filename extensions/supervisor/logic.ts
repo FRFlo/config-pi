@@ -120,6 +120,8 @@ export const isCurrentReview = (
 	reviewTask: unknown,
 	currentTask: unknown,
 ) => reviewGeneration === currentGeneration && reviewTask === currentTask;
+export const requiresCheckpointFollowup = (result: any) =>
+	result?.verified !== true || result?.scopeAligned === false;
 export const isEnabled = (read: () => string) => {
 	try {
 		return JSON.parse(read()).enabled !== false;
@@ -131,6 +133,26 @@ export const persistEnabled = (write: (value: string) => void, enabled: boolean)
 	write(JSON.stringify({ enabled }, null, 2));
 export const shouldStart = (enabled: boolean, source: string | undefined, text: string) =>
 	enabled && source !== "extension" && gated(text);
+export const isSupervisorCommand = (text: string) => /^\/supervisor(?:\s|$)/i.test(text.trim());
+export const latestUserRequest = (entries: readonly any[]) => {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const entry = entries[i];
+		const message = entry?.type === "message" ? entry.message : entry;
+		if (message?.role !== "user") continue;
+		const text =
+			typeof message.content === "string"
+				? message.content
+				: Array.isArray(message.content)
+					? message.content
+							.filter((part: any) => part?.type === "text")
+							.map((part: any) => part.text)
+							.join("\n")
+					: "";
+		const request = text.trim();
+		if (request && !isSupervisorCommand(request)) return request;
+	}
+	return undefined;
+};
 export const isRequirementFollowup = (text: string) => {
 	const s = text.trim();
 	if (

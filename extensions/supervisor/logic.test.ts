@@ -11,12 +11,15 @@ import {
 	isEnabled,
 	isPathWithinCwd,
 	isRequirementFollowup,
+	isSupervisorCommand,
+	latestUserRequest,
 	loadSupervisorModel,
 	newlyCompletedTrackedTasks,
 	snapshotTodoStatuses,
 	persistEnabled,
 	publicTodoPrompt,
 	renderPublicTodo,
+	requiresCheckpointFollowup,
 	reopenItems,
 	resolveTrackedTasks,
 	restoreSupervisionFromTodo,
@@ -168,6 +171,21 @@ describe("supervisor policy", () => {
 		expect(isRequirementFollowup("Thanks, okay.")).toBe(false);
 		expect(isRequirementFollowup("Also preserve the keyboard shortcut")).toBe(true);
 	});
+	it("uses the latest actual user request and skips supervisor commands", () => {
+		expect(
+			latestUserRequest([
+				{
+					type: "message",
+					message: { role: "user", content: "Implement the parser and add tests" },
+				},
+				{ type: "message", message: { role: "assistant", content: "Starting now." } },
+				{ type: "message", message: { role: "user", content: "/supervisor on" } },
+			]),
+		).toBe("Implement the parser and add tests");
+		expect(isSupervisorCommand(" /supervisor on ")).toBe(true);
+		expect(isSupervisorCommand("Please enable supervisor")).toBe(false);
+		expect(latestUserRequest([{ role: "user", content: "/supervisor on" }])).toBeUndefined();
+	});
 	it("queues only newly completed tracked Todo items", () => {
 		const previous = [
 			{
@@ -198,6 +216,12 @@ describe("supervisor policy", () => {
 		expect(newlyCompletedTrackedTasks(snapshot, next, [{ content: "Target" }])).toEqual([
 			next[0].tasks[1],
 		]);
+	});
+	it("requires checkpoint follow-up for missing evidence or scope drift", () => {
+		expect(requiresCheckpointFollowup({ verified: true, scopeAligned: true })).toBe(false);
+		expect(requiresCheckpointFollowup({ verified: false, scopeAligned: true })).toBe(true);
+		expect(requiresCheckpointFollowup({ verified: true, scopeAligned: false })).toBe(true);
+		expect(requiresCheckpointFollowup(undefined)).toBe(true);
 	});
 	it("loads and overlays a configured reviewer model", () => {
 		expect(
