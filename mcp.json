@@ -7,21 +7,6 @@
       },
       "directTools": true
     },
-    "svelte": {
-      "command": "bunx",
-      "args": [
-        "-y",
-        "@sveltejs/mcp"
-      ]
-    },
-    "gitnexus": {
-      "command": "bunx",
-      "args": [
-        "-y",
-        "gitnexus",
-        "mcp"
-      ]
-    },
     "grep_app": {
       "url": "https://mcp.grep.app",
       "directTools": true
@@ -40,6 +25,21 @@
     },
     "posthog": {
       "url": "https://mcp.posthog.com/mcp"
+    },
+    "svelte": {
+      "command": "bunx",
+      "args": [
+        "-y",
+        "@sveltejs/mcp"
+      ]
+    },
+    "gitnexus": {
+      "command": "bunx",
+      "args": [
+        "-y",
+        "gitnexus",
+        "mcp"
+      ]
     },
     "lugo": {
       "command": "./bin/lugo-mcp.exe",
