@@ -10,7 +10,7 @@ export default function commitExtension(pi: ExtensionAPI) {
 					"Analyse les changements et crée des commits atomiques conformes à Conventional Commits, dans la langue utilisée par les autres commits du dépôt.",
 					additionalInstructions,
 				].filter(Boolean).join("\n\n"),
-				{ streamingBehavior: ctx.isStreaming ? "followUp" : "steer" },
+				{ deliverAs: ctx.isIdle() ? "steer" : "followUp" },
 			);
 		},
 	});
