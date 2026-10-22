@@ -12,7 +12,8 @@
     "git:github.com/FRFlo/pi-quotas",
     "npm:pi-antigravity",
     "npm:@posthog/pi",
-    "npm:pi-lsp"
+    "npm:pi-lsp",
+    "npm:@tintinweb/pi-subagents"
   ],
   "observational-memory": {
     "backend": "sqlite",

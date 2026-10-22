@@ -9,7 +9,6 @@ import {
 	incompleteTasks,
 	isEnabledForSession,
 	isCurrentReview,
-	isPathWithinCwd,
 	isRequirementFollowup,
 	isSupervisorCommand,
 	latestUserRequest,
@@ -233,12 +232,6 @@ describe("supervisor policy", () => {
 			loadSupervisorModel([{ observationalMemory: { model: { provider: "x", id: "y" } } }]),
 		).toBeUndefined();
 		expect(loadSupervisorModel([{ supervisor: { model: { provider: "x" } } }])).toBeUndefined();
-	});
-	it("restricts reviewer filesystem paths to cwd and descendants", () => {
-		expect(isPathWithinCwd("C:/repo", "src/file.ts")).toBe(true);
-		expect(isPathWithinCwd("C:/repo", "C:/repo/src/file.ts")).toBe(true);
-		expect(isPathWithinCwd("C:/repo", "../outside/secret.txt")).toBe(false);
-		expect(isPathWithinCwd("C:/repo", "C:/other/secret.txt")).toBe(false);
 	});
 	it("restores supervision from incomplete current Todo", () => {
 		const current = [

@@ -1,5 +1,3 @@
-import { isAbsolute, relative, resolve } from "node:path";
-
 export type PublicTask = { content: string; status: string; guidance?: string };
 export type PublicPhase = { name: string; tasks: PublicTask[] };
 export type SupervisorModel = { provider: string; id: string; thinking?: string };
@@ -57,12 +55,6 @@ export const snapshotTodoStatuses = (phases: readonly any[]) =>
 		),
 	);
 
-export const isPathWithinCwd = (cwd: string, target: string) => {
-	const base = resolve(cwd),
-		resolved = resolve(base, target || ".");
-	const rel = relative(base, resolved);
-	return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-};
 const ACTIONS =
 	/\b(implement|build|create|refactor|migrate|debug|fix|deploy|upgrade|remove|delete|add|update|test|verify|document|rewrite)\b/gi;
 export const gated = (s: string) => {

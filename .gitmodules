@@ -14,10 +14,6 @@
 [submodule "git/github.com/FRFlo/pi-todotools"]
 	path = git/github.com/FRFlo/pi-todotools
 	url = https://github.com/FRFlo/pi-todotools.git
-[submodule "extensions/interactive-subagents"]
-	path = extensions/interactive-subagents
-	url = https://github.com/FRFlo/pi-interactive-subagents
-	branch = main
 [submodule "git/github.com/FRFlo/pi-mcp-adapter"]
 	path = git/github.com/FRFlo/pi-mcp-adapter
 	url = https://github.com/FRFlo/pi-mcp-adapter.git

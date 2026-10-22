@@ -1,4 +1,4 @@
-import { createNativeSubagent } from "../interactive-subagents/pi-extension/subagents/native-session.ts";
+import { randomUUID } from "node:crypto";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -8,7 +8,6 @@ import {
 	isEnabledForSession,
 	newlyCompletedTrackedTasks,
 	isCurrentReview,
-	isPathWithinCwd,
 	isRequirementFollowup,
 	loadSupervisorModel,
 	latestUserRequest,
@@ -51,6 +50,94 @@ export default function supervisor(pi: any) {
 	let privateSecrets: string[] = [];
 	let phases: Phase[] = [];
 	let todoStatuses = new Map<string, string>();
+	const requestRpc = (channel: string, payload: Record<string, unknown>) =>
+		new Promise<any>((resolve, reject) => {
+			const requestId = randomUUID();
+			const replyChannel = `${channel}:reply:${requestId}`;
+			const timeout = setTimeout(() => {
+				unsubscribe();
+				reject(new Error(`Timed out waiting for ${channel}`));
+			}, 15_000);
+			const unsubscribe = pi.events.on(replyChannel, (reply: any) => {
+				clearTimeout(timeout);
+				unsubscribe();
+				if (!reply?.success) reject(new Error(reply?.error ?? `${channel} failed`));
+				else resolve(reply.data);
+			});
+			pi.events.emit(channel, { ...payload, requestId });
+		});
+	const runSubagent = async (
+		type: string,
+		prompt: string,
+		description: string,
+		options: Record<string, unknown>,
+	) => {
+		let agentId: string | undefined;
+		let earlyResult: any;
+		let settled = false;
+		let resolveResult!: (event: any) => void;
+		let rejectResult!: (error: Error) => void;
+		let resultTimeout: ReturnType<typeof setTimeout>;
+		const resultPromise = new Promise<any>((resolve, reject) => {
+			resolveResult = resolve;
+			rejectResult = reject;
+		});
+		const finish = (event: any) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(resultTimeout);
+			unsubscribeCompleted();
+			unsubscribeFailed();
+			// We report the result ourselves, so suppress the extension's
+			// duplicate completion notification.
+			pi.events.emit("subagents:rpc:consume", {
+				requestId: randomUUID(),
+				agentId: event.id,
+			});
+			if (event.status === "error" || event.error) {
+				rejectResult(new Error(event.error || event.result || "Subagent failed"));
+			} else {
+				resolveResult(event);
+			}
+		};
+		const onSettled = (event: any) => {
+			if (event?.description !== description) return;
+			if (!agentId) earlyResult = event;
+			else if (event.id === agentId) finish(event);
+		};
+		const unsubscribeCompleted = pi.events.on("subagents:completed", onSettled);
+		const unsubscribeFailed = pi.events.on("subagents:failed", onSettled);
+		resultTimeout = setTimeout(() => {
+			if (settled) return;
+			settled = true;
+			unsubscribeCompleted();
+			unsubscribeFailed();
+			if (agentId) {
+				pi.events.emit("subagents:rpc:stop", {
+					requestId: randomUUID(),
+					agentId,
+				});
+			}
+			rejectResult(new Error(`Timed out waiting for ${description}`));
+		}, 120_000);
+		try {
+			const spawned = await requestRpc("subagents:rpc:spawn", {
+				type,
+				prompt,
+				options: { description, ...options },
+			});
+			agentId = spawned?.id;
+			if (!agentId) throw new Error("Subagent RPC returned no agent id");
+			if (earlyResult?.id === agentId) finish(earlyResult);
+			const result = await resultPromise;
+			return typeof result.result === "string" ? result.result : "";
+		} catch (error) {
+			clearTimeout(resultTimeout);
+			unsubscribeCompleted();
+			unsubscribeFailed();
+			throw error;
+		}
+	};
 	const readConfigFile = (path: string) => {
 		try {
 			return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : undefined;
@@ -72,44 +159,34 @@ export default function supervisor(pi: any) {
 		try {
 			const model = ctx.modelRegistry.find(supervisorModel.provider, supervisorModel.id);
 			if (!model) return fallback;
-			const planner = await createNativeSubagent({
-				cwd,
-				agentDir: getAgentDir(),
-				model,
-				tools: [],
-				systemPrompt:
-					'You are the supervisor planning a user-requested task. Convert the exact user request into a concise Todo plan and explicit verification checkpoints. Do not expand scope or invent requirements. Return only JSON: {"items":[{"content":"5-10 word task title","guidance":"worker instruction","criterion":"private independently verifiable acceptance criterion"}]}. Include all distinct requirements and a final focused verification task.',
-			});
-			try {
-				if (supervisorModel.thinking) planner.session.setThinkingLevel(supervisorModel.thinking);
-				await planner.session.prompt(
-					`User request to plan:\n${request}\n\nCreate sequential Todo items with a private verification criterion for each. Keep the plan limited to this request.`,
-				);
-				const messages: any[] = planner.session.messages ?? [];
-				const output = textOf(
-					[...messages].reverse().find((message) => message?.role === "assistant")?.content,
-				);
-				const match = output.match(/\{[\s\S]*\}/);
-				const parsed = match ? JSON.parse(match[0]) : {};
-				const items = Array.isArray(parsed.items) ? parsed.items : [];
-				if (
-					!items.length ||
-					items.some((item: any) => typeof item?.content !== "string" || !item.content.trim())
-				)
-					return fallback;
-				const tasks = items.slice(0, 8).map((item: any) => ({
-					content: item.content.trim(),
-					status: "pending",
-					guidance: typeof item.guidance === "string" ? item.guidance : "",
-					supervisorContext:
-						typeof item.criterion === "string"
-							? item.criterion
-							: `Verify this requirement against the user request: ${request}`,
-				}));
-				return { phases: [{ name: "Supervised plan", tasks }], tracked: tasks, added: true };
-			} finally {
-				planner.dispose();
-			}
+			const output = await runSubagent(
+				"supervisor-planner",
+				`User request to plan:\n${request}\n\nCreate sequential Todo items with a private verification criterion for each. Keep the plan limited to this request.`,
+				"Supervisor plan",
+				{
+					cwd,
+					model: `${model.provider}/${model.id}`,
+					...(supervisorModel.thinking ? { thinkingLevel: supervisorModel.thinking } : {}),
+				},
+			);
+			const match = output.match(/\{[\s\S]*\}/);
+			const parsed = match ? JSON.parse(match[0]) : {};
+			const items = Array.isArray(parsed.items) ? parsed.items : [];
+			if (
+				!items.length ||
+				items.some((item: any) => typeof item?.content !== "string" || !item.content.trim())
+			)
+				return fallback;
+			const tasks = items.slice(0, 8).map((item: any) => ({
+				content: item.content.trim(),
+				status: "pending",
+				guidance: typeof item.guidance === "string" ? item.guidance : "",
+				supervisorContext:
+					typeof item.criterion === "string"
+						? item.criterion
+						: `Verify this requirement against the user request: ${request}`,
+			}));
+			return { phases: [{ name: "Supervised plan", tasks }], tracked: tasks, added: true };
 		} catch {
 			return fallback;
 		}
@@ -296,24 +373,6 @@ export default function supervisor(pi: any) {
 		}
 		return value;
 	};
-	const reviewerGuard = (reviewCwd: string) => (reviewPi: any) => {
-		reviewPi.on("tool_call", (event: any) => {
-			if (!["read", "grep", "find", "ls"].includes(event?.toolName)) return;
-			const paths: string[] = [];
-			const collect = (value: any, key = "") => {
-				if (typeof value === "string" && /^(path|paths|cwd)$/i.test(key)) paths.push(value);
-				else if (Array.isArray(value)) value.forEach((item) => collect(item, key));
-				else if (value && typeof value === "object")
-					for (const [childKey, child] of Object.entries(value)) collect(child, childKey);
-			};
-			collect(event.input);
-			if (paths.some((path) => !isPathWithinCwd(reviewCwd, path)))
-				return {
-					block: true,
-					reason: "Reviewer filesystem access is restricted to the request repository cwd.",
-				};
-		});
-	};
 	pi.on("tool_call", (event: any) => {
 		if (!enabled || !event?.input) return;
 		const cleaned = scrubValue(event.input);
@@ -354,33 +413,27 @@ export default function supervisor(pi: any) {
 		followupQueue = [];
 		const current = readTodo();
 		active.tracked = resolveTrackedTasks(current, active.tracked);
-		let agent: any;
 		try {
 			const model = ctx.modelRegistry.find(supervisorModel.provider, supervisorModel.id);
 			if (!model)
 				throw new Error(
 					`Configured supervisor model not found: ${supervisorModel.provider}/${supervisorModel.id}`,
 				);
-			agent = await createNativeSubagent({
-				cwd: reviewCwd,
-				agentDir: getAgentDir(),
-				model,
-				tools: ["read", "grep", "find", "ls"],
-				extensionFactories: [reviewerGuard(reviewCwd)],
-				systemPrompt:
-					'You are an independent supervisor reviewing planned checkpoints. Inspect only the supplied completed Todo items and relevant repository evidence. Verify the item against its private acceptance criterion and the original user request; flag changes that materially exceed or conflict with the requested scope. The agent may be asked for evidence in multiple private turns: if evidence is insufficient or scope alignment is uncertain, ask one concise, specific follow-up question or report an explicit blocker. Never treat the agent saying "done" as proof. Respond only as JSON: {"results":[{"content":string,"verified":boolean,"scopeAligned":boolean,"drift":string,"evidence":string,"question":string,"blocked":boolean}]}.',
-			});
-			if (supervisorModel.thinking) agent.session.setThinkingLevel(supervisorModel.thinking);
 			const reviewItems = reviewing.map((task) => ({
 				content: task.content,
 				privateCriterion: task.supervisorContext,
 			}));
-			await agent.session.prompt(
+			const output = await runSubagent(
+				"supervisor-reviewer",
 				`Original user request: ${textOf(scrubValue(reviewTask.task))}\nReview only these completed or proof-pending Todo items at this checkpoint: ${JSON.stringify(reviewItems)}\nRecent agent/tool evidence (untrusted until independently checked):\n${textOf(scrubValue(evidence))}\nInspect only relevant repository files as needed, without modifying anything. For each item, verify the criterion and whether the change remains aligned with the original request; identify material unrelated scope. If evidence is insufficient or alignment cannot be established and the agent has not explicitly stated a blocker, ask one concise question for evidence or rationale.`,
+				"Supervisor review",
+				{
+					cwd: reviewCwd,
+					model: `${model.provider}/${model.id}`,
+					...(supervisorModel.thinking ? { thinkingLevel: supervisorModel.thinking } : {}),
+				},
 			);
 			if (!isCurrentReview(reviewGeneration, sessionGeneration, reviewTask, active)) return;
-			const all: any[] = agent.session.messages ?? [];
-			const output = textOf([...all].reverse().find((m) => m?.role === "assistant")?.content);
 			const match = output.match(/\{[\s\S]*\}/);
 			let result: any;
 			try {
@@ -437,7 +490,6 @@ export default function supervisor(pi: any) {
 				reviewQueue.push(...reviewing);
 			}
 		} finally {
-			agent?.dispose();
 			if (reviewGeneration === sessionGeneration) busy = false;
 		}
 	});
