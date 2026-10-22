@@ -31,5 +31,8 @@
   "terminal": {
     "notify": "next-turn"
   },
-  "hideThinkingBlock": true
+  "hideThinkingBlock": true,
+  "extensions": [
+    "-builtin:mcp"
+  ]
 }
