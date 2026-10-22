@@ -166,6 +166,7 @@ export default function supervisor(pi: any) {
 				{
 					cwd,
 					model: `${model.provider}/${model.id}`,
+					persistSession: false,
 					...(supervisorModel.thinking ? { thinkingLevel: supervisorModel.thinking } : {}),
 				},
 			);
@@ -430,6 +431,7 @@ export default function supervisor(pi: any) {
 				{
 					cwd: reviewCwd,
 					model: `${model.provider}/${model.id}`,
+					persistSession: false,
 					...(supervisorModel.thinking ? { thinkingLevel: supervisorModel.thinking } : {}),
 				},
 			);
