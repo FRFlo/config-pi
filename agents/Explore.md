@@ -4,6 +4,7 @@ description: Fast read-only search agent for locating code. Use for file pattern
 tools: read, bash, grep, find, ls
 extensions: true
 skills: true
+allowed_subagents: all
 model: antigravity/gemini-3.8-flash
 prompt_mode: replace
 ---

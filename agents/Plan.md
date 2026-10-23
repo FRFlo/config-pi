@@ -4,6 +4,7 @@ description: Software architect for read-only implementation planning; returns s
 tools: read, bash, grep, find, ls
 extensions: true
 skills: true
+allowed_subagents: all
 model: openai-codex/gpt-6.1-sol
 prompt_mode: replace
 ---
