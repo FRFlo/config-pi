@@ -8,7 +8,6 @@
     "git:github.com/FRFlo/pi-mcp-adapter",
     "git:github.com/code-yeongyu/pi-apply-patch",
     "git:github.com/FRFlo/pi-todotools",
-    "git:github.com/code-yeongyu/pi-openai-web-search",
     "git:github.com/FRFlo/pi-quotas",
     "npm:pi-antigravity",
     "npm:@posthog/pi",
