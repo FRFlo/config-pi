@@ -1,0 +1,60 @@
+{
+  "mcpServers": {
+    "context7": {
+      "url": "https://mcp.context7.com/mcp",
+      "headers": {
+        "CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}"
+      }
+    },
+    "grep_app": {
+      "url": "https://mcp.grep.app"
+    },
+    "cloudflare-api": {
+      "url": "https://mcp.cloudflare.com/mcp",
+      "exposure": "deferred"
+    },
+    "cloudflare-browser": {
+      "url": "https://browser.mcp.cloudflare.com/mcp",
+      "exposure": "direct"
+    },
+    "github": {
+      "url": "https://api.githubcopilot.com/mcp",
+      "headers": {
+        "Authorization": "!echo Bearer $(gh auth token)"
+      }
+    },
+    "posthog": {
+      "url": "https://mcp.posthog.com/mcp"
+    },
+    "svelte": {
+      "command": "bunx",
+      "args": [
+        "-y",
+        "@sveltejs/mcp"
+      ]
+    },
+    "gitnexus": {
+      "command": "bunx",
+      "args": [
+        "-y",
+        "gitnexus",
+        "mcp"
+      ]
+    },
+    "lugo": {
+      "command": "./bin/lugo-mcp.exe",
+      "args": [
+        "."
+      ],
+      "cwd": "."
+    },
+    "chrome-devtools": {
+      "command": "bunx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest"
+      ],
+      "enabled": false
+    }
+  }
+}
