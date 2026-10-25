@@ -20,11 +20,6 @@ export interface UserPreferences {
 		context7ApiKey?: string;
 		[key: string]: unknown;
 	};
-	posthog?: {
-		apiKey?: string;
-		host?: string;
-		mcpEnabled?: boolean;
-	};
 	"observational-memory"?: {
 		backend?: string;
 		models?: {
@@ -102,18 +97,6 @@ export function applyEnvInjection(prefs: UserPreferences): void {
 	if (prefs.discordBridge?.channelId && !process.env.PI_BRIDGE_CHANNEL_ID) {
 		process.env.PI_BRIDGE_CHANNEL_ID = prefs.discordBridge.channelId;
 	}
-
-	// Inject PostHog LLM Analytics environment.
-	// Explicit environment variables take precedence over preferences.json.
-	if (prefs.posthog?.apiKey && !process.env.POSTHOG_API_KEY) {
-		process.env.POSTHOG_API_KEY = prefs.posthog.apiKey;
-	}
-	if (prefs.posthog?.host && !process.env.POSTHOG_HOST) {
-		process.env.POSTHOG_HOST = prefs.posthog.host;
-	}
-	if (prefs.posthog?.mcpEnabled !== undefined && !process.env.POSTHOG_MCP_ENABLED) {
-		process.env.POSTHOG_MCP_ENABLED = String(prefs.posthog.mcpEnabled);
-	}
 }
 
 function persistSelectedModel(provider: string, model: string, cwd: string, notify?: (message: string, level: "error") => void): void {
@@ -182,7 +165,6 @@ export default function preferencesLoaderExtension(pi: ExtensionAPI) {
 				`Thème : ${prefs.theme ?? "(non défini)"}`,
 				`Discord Bridge : ${prefs.discordBridge?.enabled ? "activé" : "désactivé"}`,
 				`Context7 API Key : ${prefs.mcp?.context7ApiKey ? "configurée" : "absente"}`,
-				`PostHog Analytics : ${prefs.posthog?.apiKey ? "configuré" : "absent"}`,
 			].join("\n");
 
 			if (ctx.hasUI) {

@@ -3,13 +3,14 @@
   "theme": "dark",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-6-luna",
+  "enableInstallTelemetry": false,
+  "enableAnalytics": false,
   "packages": [
     "git:github.com/FRFlo/pi-web-search",
     "git:github.com/code-yeongyu/pi-apply-patch",
     "git:github.com/FRFlo/pi-todotools",
     "git:github.com/FRFlo/pi-quotas",
     "npm:pi-antigravity",
-    "npm:@posthog/pi",
     "npm:pi-lsp",
     "npm:@tintinweb/pi-subagents"
   ],
