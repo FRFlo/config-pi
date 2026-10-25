@@ -42,7 +42,7 @@
       ]
     },
     "lugo": {
-      "command": "./bin/lugo-mcp.exe",
+      "command": "~/.pi/agent/bin/lugo-mcp.exe",
       "args": [
         "."
       ],
