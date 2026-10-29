@@ -15,7 +15,7 @@ import {
 	loadDiscordBridgeConfig,
 	resolveDiscordQuestion,
 } from "./discord-bridge";
-import { hermesInput, hermesSelect, isHermesRpc } from "./hermes-rpc";
+import { hermesInput, hermesSelect, isHermesRpc, resolveRpcSelection } from "./hermes-rpc";
 
 interface AskOption {
 	label: string;
@@ -276,15 +276,21 @@ async function askRpcMode(
 	if (mode === "single-select") {
 		const otherLabel = getOtherLabel(options);
 		const selected = await hermesSelect(ctx, title, [...options.map(rpcOptionLabel), otherLabel], signal);
-		if (selected === undefined) return null;
+		const resolved = resolveRpcSelection(selected, options.map(rpcOptionLabel));
+		if (!resolved) return null;
 		const other = selected === otherLabel;
 		if (other) {
 			const value = (await hermesInput(ctx, `${title}\n\nCustom answer`, "Enter your answer", signal))?.trim() || "";
 			return value ? [{ type: "other", label: value, value }] : null;
 		}
-		const index = options.map(rpcOptionLabel).indexOf(selected);
-		const option = options[index];
-		return option ? [{ type: "option", label: option.label, value: option.value, index: index + 1 }] : null;
+		if (resolved.kind === "other") {
+			const value = resolved.value.trim();
+			return value ? [{ type: "other", label: value, value }] : null;
+		}
+		const option = options[resolved.index];
+		return option
+			? [{ type: "option", label: option.label, value: option.value, index: resolved.index + 1 }]
+			: null;
 	}
 
 	const remaining = [...options];
@@ -303,9 +309,16 @@ async function askRpcMode(
 			if (value) answers.push({ type: "other", label: value, value });
 			continue;
 		}
-		const index = remaining.map(rpcOptionLabel).indexOf(selected);
-		const option = index >= 0 ? remaining.splice(index, 1)[0] : undefined;
-		if (option) answers.push({ type: "option", label: option.label, value: option.value, index: options.indexOf(option) + 1 });
+		const resolved = resolveRpcSelection(selected, remaining.map(rpcOptionLabel));
+		if (resolved?.kind === "other") {
+			const value = resolved.value.trim();
+			if (value) answers.push({ type: "other", label: value, value });
+			continue;
+		}
+		if (resolved?.kind === "option") {
+			const option = remaining.splice(resolved.index, 1)[0];
+			if (option) answers.push({ type: "option", label: option.label, value: option.value, index: options.indexOf(option) + 1 });
+		}
 	}
 	return answers;
 }
@@ -318,6 +331,23 @@ async function askTextMode(
 	initialDraft = "",
 	persist?: (draft: string) => void,
 ): Promise<{ answers: AskAnswer[] | null; retry?: boolean }> {
+	// T3 Code's Pi RPC bridge exposes serializable dialogs, not Pi's custom TUI.
+	// Keep restored/pending text questions answerable there as well.
+	if (isHermesRpc(ctx)) {
+		const title = [
+			rpcQuestionTitle(question, details, context),
+			initialDraft ? `Existing draft:\n${initialDraft}` : undefined,
+		].filter(Boolean).join("\n\n");
+		const value = (await hermesInput(
+			ctx,
+			title,
+			initialDraft ? "Continue or replace your answer" : "Enter your answer",
+		))?.trim() || "";
+		if (!value) return { answers: null };
+		persist?.(value);
+		return { answers: [{ type: "text", label: value, value }] };
+	}
+
 	const discordConfig = loadDiscordBridgeConfig();
 
 	return ctx.ui.custom<{ answers: AskAnswer[] | null; retry?: boolean }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null; retry?: boolean }) => void) => {

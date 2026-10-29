@@ -91,7 +91,7 @@ export function evaluateConsolidatorTrigger(pi: ExtensionAPI, runtime: Runtime, 
 
 	runtime.consolidatorInFlight = true;
 	if (ctx.hasUI) {
-		ctx.ui?.notify(`om: consolidator started (${promote.length} obs, ~${poolTokens(promote).toLocaleString()} tok)`, "info");
+		runtime.notify(ctx, `om: consolidator started (${promote.length} obs, ~${poolTokens(promote).toLocaleString()} tok)`, "info");
 	}
 	// Deliberately NOT tracked in observerTasks: compaction waits only for in-flight observers,
 	// never the consolidator (design R5). The consolidatorInFlight flag enforces one-at-a-time.
@@ -146,13 +146,13 @@ async function dispatchConsolidator(
 			model: runtime.config.models.consolidator,
 		});
 		if (ctx.hasUI && ctx.ui) {
-			runtime.queueToast(`om: consolidator promoted ${toDrop.length} obs`, "info", ctx.ui.notify.bind(ctx.ui));
+			runtime.queueToast(`om: consolidator promoted ${toDrop.length} obs`, "info", runtime.notifier(ctx));
 		}
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		runtime.lastWorkerError = message;
 		runtime.status.workerError(runId);
-		if (ctx.hasUI) ctx.ui?.notify(`om: consolidator failed: ${message}`, "error");
+		if (ctx.hasUI) runtime.notify(ctx, `om: consolidator failed: ${message}`, "error");
 	} finally {
 		runtime.consolidatorController = undefined;
 		runtime.consolidatorInFlight = false;

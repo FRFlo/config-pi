@@ -100,7 +100,7 @@ export function evaluateObserverTriggers(pi: ExtensionAPI, runtime: Runtime, ctx
 		if (hasUI) startToastLines.push(`om: observer started (~${slice.tokens.toLocaleString()} tok)`);
 	}
 
-	if (startToastLines.length > 0) ui?.notify(startToastLines.join("\n"), "info");
+	if (startToastLines.length > 0) runtime.notify(ctx, startToastLines.join("\n"), "info");
 	runtime.refreshFooterGauges(sessionManager.getBranch(), ctx.getContextUsage?.()?.tokens ?? null);
 }
 
@@ -175,7 +175,7 @@ async function dispatchObserver(
 			runtime.queueToast(
 				`om: observer +${observations.length} (~${slice.tokens.toLocaleString()} tok)`,
 				"info",
-				ctx.ui.notify.bind(ctx.ui),
+				runtime.notifier(ctx),
 			);
 		}
 	} catch (error) {
@@ -184,7 +184,7 @@ async function dispatchObserver(
 		runtime.status.workerError(runId);
 		// Errors bypass the coalescer: they use a different display level and
 		// should never be merged with info lines.
-		if (ctx.hasUI) ctx.ui?.notify(`om: observer failed: ${message}`, "error");
+		if (ctx.hasUI) runtime.notify(ctx, `om: observer failed: ${message}`, "error");
 	} finally {
 		runtime.observersInFlight.delete(runId);
 	}

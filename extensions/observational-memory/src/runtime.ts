@@ -1,6 +1,7 @@
 import { type Config, DEFAULTS, loadConfig } from "./config.js";
 import { foldLedger, poolTokens, rawTokensSinceObservationCoverage, sumSessionCost, type Entry } from "./ledger/index.js";
 import { initSqliteMemory } from "./memory/sqlite.js";
+import { notifyOm, omNotifier, type NotifyContext, type NotifyLevel } from "./ui/notify.js";
 import { StatusController } from "./ui/status-controller.js";
 
 /**
@@ -63,6 +64,19 @@ export class Runtime {
 	lastCompactionObserverWait: "skipped" | "waited" | undefined;
 
 	readonly status = new StatusController();
+
+	notify(
+		ctx: NotifyContext,
+		message: string,
+		level: NotifyLevel,
+		options?: { showInfoInRpc?: boolean },
+	): void {
+		notifyOm(ctx, message, level, options);
+	}
+
+	notifier(ctx: NotifyContext): (message: string, level: NotifyLevel) => void {
+		return omNotifier(ctx);
+	}
 
 	// ── Toast coalescer ──────────────────────────────────────────────────────────
 	// Parallel observers fire finish toasts from independent async tasks. If two

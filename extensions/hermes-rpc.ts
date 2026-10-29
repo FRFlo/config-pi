@@ -1,4 +1,4 @@
-/** Dependency-free dialogs shared by Pi extensions used through Hermes RPC. */
+/** Dependency-free Pi RPC dialogs shared by Hermes and T3 Code's Pi provider. */
 export type HermesDialogContext = {
   mode?: string;
   hasUI?: boolean;
@@ -11,6 +11,15 @@ export type HermesDialogContext = {
 
 export function isHermesRpc(ctx: { mode?: string } | undefined): boolean {
   return ctx?.mode === "rpc";
+}
+
+export function resolveRpcSelection(
+  selected: string | undefined,
+  optionLabels: readonly string[],
+): { kind: "option"; index: number } | { kind: "other"; value: string } | null {
+  if (selected === undefined) return null;
+  const index = optionLabels.indexOf(selected);
+  return index >= 0 ? { kind: "option", index } : { kind: "other", value: selected };
 }
 
 export async function hermesInput(ctx: HermesDialogContext, title: string, placeholder?: string, signal?: AbortSignal) {

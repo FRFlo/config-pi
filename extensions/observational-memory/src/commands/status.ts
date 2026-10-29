@@ -11,7 +11,7 @@ export function registerStatusCommand(pi: ExtensionAPI, runtime: Runtime): void 
 		handler: async (_args: string, ctx: any) => {
 			if (!ctx.hasUI) return;
 			if (!runtime.enabled) {
-				ctx.ui.notify("om is off (use /om on to enable)", "info");
+				runtime.notify(ctx, "om is off (use /om on to enable)", "info", { showInfoInRpc: true });
 				return;
 			}
 			runtime.ensureConfig(ctx.cwd);
@@ -40,7 +40,7 @@ export function registerStatusCommand(pi: ExtensionAPI, runtime: Runtime): void 
 				"",
 				renderTimeline(branch, runtime.config),
 			];
-			ctx.ui.notify(lines.join("\n"), "info");
+			runtime.notify(ctx, lines.join("\n"), "info", { showInfoInRpc: true });
 		},
 	});
 }

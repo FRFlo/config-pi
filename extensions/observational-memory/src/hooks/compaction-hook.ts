@@ -116,7 +116,7 @@ export function registerCompactionHook(pi: ExtensionAPI, runtime: Runtime): void
 
 		const hasUI = ctx.hasUI;
 		if (runtime.compactHookInFlight) {
-			if (hasUI) ctx.ui.notify("om: another compaction is already in progress; cancelling duplicate", "warning");
+			if (hasUI) runtime.notify(ctx, "om: another compaction is already in progress; cancelling duplicate", "warning");
 			return { cancel: true };
 		}
 
@@ -139,7 +139,7 @@ export function registerCompactionHook(pi: ExtensionAPI, runtime: Runtime): void
 			const skip = canSkipObserverWait(branch, snap.firstKeptId, snap.tail, tailTokens, runtime.observersInFlight.values());
 			runtime.lastCompactionObserverWait = skip ? "skipped" : "waited";
 			if (!skip) {
-				if (hasUI) ctx.ui.notify("om: waiting for in-flight observers before folding…", "info");
+				if (hasUI) runtime.notify(ctx, "om: waiting for in-flight observers before folding…", "info");
 				await runtime.whenObserversIdle();
 				branch = (ctx.sessionManager?.getBranch?.() as Entry[] | undefined) ?? (event.branchEntries as Entry[]);
 				snap = snapCutoff(branch, firstKeptEntryId, tailTokens);

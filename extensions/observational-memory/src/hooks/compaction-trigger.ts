@@ -81,15 +81,14 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 		const shouldResume = runtime.config.resumeAfterMidRunCompaction && turnWillContinue(event);
 
 		const hasUI = ctx.hasUI;
-		const ui = ctx.ui;
 		runtime.compactInFlight = true;
-		if (hasUI) ui?.notify("om: context threshold reached — compacting (waiting for in-flight observers)…", "info");
+		if (hasUI) runtime.notify(ctx, "om: context threshold reached — compacting (waiting for in-flight observers)…", "info");
 
 		// Fire-and-forget. The before-compact hook waits for observers and renders the block.
 		ctx.compact({
 			onComplete: () => {
 				runtime.compactInFlight = false;
-				if (hasUI) ui?.notify("om: compaction complete", "info");
+				if (hasUI) runtime.notify(ctx, "om: compaction complete", "info");
 				// Resume only a mid-run compaction, and only if still enabled (the gate may have
 				// flipped, or the session may be tearing down, while compaction ran).
 				if (!shouldResume || !runtime.enabled || runtime.config.passive) return;
@@ -103,13 +102,13 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 				} catch (error) {
 					const msg = error instanceof Error ? error.message : String(error);
 					runtime.lastWorkerError = `resume failed: ${msg}`;
-					if (hasUI) ui?.notify(`om: resume failed — ${msg}`, "error");
+					if (hasUI) runtime.notify(ctx, `om: resume failed — ${msg}`, "error");
 				}
 			},
 			onError: (error: { message: string }) => {
 				runtime.compactInFlight = false;
 				if (error.message === "Compaction cancelled") return;
-				if (hasUI) ui?.notify(`om: ${error.message}`, "error");
+				if (hasUI) runtime.notify(ctx, `om: ${error.message}`, "error");
 			},
 		});
 	});

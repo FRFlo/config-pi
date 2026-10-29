@@ -69,7 +69,7 @@ export default function observationalMemory(pi: ExtensionAPI): void {
 			const arg = (args ?? "").trim().toLowerCase();
 			const next = arg === "on" ? true : arg === "off" ? false : !runtime.enabled;
 			if (next === runtime.enabled) {
-				if (ctx.hasUI) ctx.ui.notify(`om already ${next ? "on" : "off"}`, "info");
+				if (ctx.hasUI) runtime.notify(ctx, `om already ${next ? "on" : "off"}`, "info");
 				return;
 			}
 			runtime.enabled = next;
@@ -84,7 +84,7 @@ export default function observationalMemory(pi: ExtensionAPI): void {
 				runtime.abortAllWorkers();
 				runtime.status.detach();
 			}
-			if (ctx.hasUI) ctx.ui.notify(`om ${next ? "enabled" : "disabled"}`, "info");
+			if (ctx.hasUI) runtime.notify(ctx, `om ${next ? "enabled" : "disabled"}`, "info");
 		},
 	});
 

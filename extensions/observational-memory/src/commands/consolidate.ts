@@ -12,11 +12,11 @@ export function registerConsolidateCommand(pi: ExtensionAPI, runtime: Runtime): 
 		description: "Force an observational-memory consolidation now (ignores the pool threshold)",
 		handler: async (_args: string, ctx: any) => {
 			if (!runtime.enabled) {
-				if (ctx.hasUI) ctx.ui.notify("om is off (use /om on to enable)", "info");
+				if (ctx.hasUI) runtime.notify(ctx, "om is off (use /om on to enable)", "info");
 				return;
 			}
 			if (runtime.consolidatorInFlight) {
-				if (ctx.hasUI) ctx.ui.notify("om: consolidation already in progress", "warning");
+				if (ctx.hasUI) runtime.notify(ctx, "om: consolidation already in progress", "warning");
 				return;
 			}
 			runtime.ensureConfig(ctx.cwd);
@@ -25,7 +25,8 @@ export function registerConsolidateCommand(pi: ExtensionAPI, runtime: Runtime): 
 			const { promote } = selectPromotionOverflow(active, runtime.config.poolTargetTokens);
 			if (promote.length === 0) {
 				if (ctx.hasUI) {
-					ctx.ui.notify(
+					runtime.notify(
+						ctx,
 						`om: nothing to consolidate (pool ${poolTokens(active).toLocaleString()} tok <= target ${runtime.config.poolTargetTokens.toLocaleString()} tok)`,
 						"info",
 					);
