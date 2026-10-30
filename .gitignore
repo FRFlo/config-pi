@@ -9,6 +9,7 @@ models-store.json
 
 # Pi runtime state (created when this repo is used as ~/.pi/agent)
 .pi/
+install/
 .memory/
 .senpi/
 sessions/
