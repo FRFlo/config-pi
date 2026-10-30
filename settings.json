@@ -14,6 +14,9 @@
     "npm:pi-lsp",
     "npm:@tintinweb/pi-subagents"
   ],
+  "extensions": [
+    "!**/*.test.ts"
+  ],
   "observational-memory": {
     "backend": "sqlite",
     "models": {
