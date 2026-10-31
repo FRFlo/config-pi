@@ -1,13 +1,14 @@
 ---
 name: ask-user-question
-description: Ask for a missing decision or clarification through T3 Code's native user input UI.
+description: Ask for a missing decision through the current runtime's native user input interface.
 ---
 
-# Ask the user in T3 Code
+# Ask the user
 
-Use T3 Code's native `request_user_input_async` when a user choice or clarification materially affects the work. Do not add or invoke a parallel `ask_user_question` extension.
+Use the input interface provided by the current runtime when a user choice or clarification materially affects the work.
 
-- Ask a concise, self-contained question. Offer a few short options when they cover the likely choices, put the recommended option first, and leave free-text available for anything else.
-- Bundle closely related choices into one call; separate unrelated decisions.
-- Continue work that does not depend on the answer. Pause only the work that does depend on it.
-- Use ordinary conversation for simple progress updates. Do not use the pending-request API to create a question; it is for reading or answering requests that T3 Code has already created.
+- In T3 Code's Codex runtime, call `request_user_input_async`. In Pi, use the `ask_user_question` extension when it is available.
+- The Pi extension detects T3 Code's Pi RPC mode and uses its native `ctx.ui.input` and `ctx.ui.select` dialogs instead of rendering a terminal-only prompt.
+- Do not invoke both interfaces for the same question. Do not use the pending-request API to create a question; it only reads or answers requests already created by T3 Code.
+- Ask concise, self-contained questions. Offer a few short options when useful, put the recommended option first, and leave free-text available.
+- Continue work that does not depend on the answer. Pause only the dependent work.
