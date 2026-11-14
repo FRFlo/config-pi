@@ -4,6 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { getAgentDir, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { hash, readState, record, renderPlan, savePlan, saveState, statePath, todoKey, verifyPlan, type Delegate, type PlanState } from "./state";
+import { executionPrompt, planningPrompt, pausedPrompt, planStartMessage, planToolDescriptions } from "./prompts";
 
 const allowedDuringPlan = new Set(["read", "grep", "find", "ls", "glob", "webfetch", "web_search", "ask_user_question", "ask_question", "plan_submit", "plan_status"]);
 const nonempty = Type.String({ minLength: 1, maxLength: 4000 });
@@ -13,22 +14,6 @@ const getSession = (ctx: ExtensionContext) => ctx.sessionManager.getSessionId();
 const load = (ctx: ExtensionContext) => readState(agentDir, ctx.cwd, getSession(ctx));
 const lock = <T>(ctx: ExtensionContext, fn: () => Promise<T>) => withFileMutationQueue(statePath(agentDir, ctx.cwd, getSession(ctx)), fn);
 const result = (text: string, details: unknown = {}) => ({ content: [{ type: "text" as const, text }], details });
-
-function bridgeInventory(pi: ExtensionAPI): string {
-  const bridge = process.env.T3_PI_MCP_EXTENSION_PATH;
-  if (!bridge) return "Pont T3 non détecté dans cette session ; vérifie les outils disponibles avant de conclure qu’ils sont absents.";
-  const catalog = pi.getAllTools();
-  return ["orchestrator_capabilities", "delegate_task", "task_status", "task_cancel"].map((name) => {
-    const fullName = `mcp__t3-code__${name}`;
-    const tool = catalog.find((item) => item.name === fullName && typeof item.sourceInfo?.path === "string" && resolve(item.sourceInfo.path) === resolve(bridge));
-    return tool ? `${fullName} : ${tool.exposure}` : `${fullName} : non détecté ; vérifier par son nom avant de conclure à son absence`;
-  }).join("\n");
-}
-function executionPrompt(state: PlanState, pi: ExtensionAPI): string {
-  const tasks = state.tasks.map((task, i) => `${i + 1}. [${task.status}] ${task.title}\n   Titre todo : ${todoKey(state, i)}\n   Travail : ${task.description}\n   Vérification : ${task.verify}${task.dependsOn?.length ? `\n   Dépend de : ${task.dependsOn.join(", ")}` : ""}${task.evidence ? `\n   Preuve : ${task.evidence}` : ""}`).join("\n");
-  const delegates = (state.delegates ?? []).map((item) => `${item.taskId}: ${item.status}${item.step ? `, étape ${item.step}` : ""}${item.role ? `, ${item.role}` : ""}`).join("\n");
-  return `Le plan ci-dessous a été approuvé explicitement par l'utilisateur. Commence immédiatement son exécution.\nPlan : ${state.planPath}\nEmpreinte SHA-256 : ${state.digest}\nObjectif : ${state.summary}\n\n${tasks}\n\nTâches T3 déjà observées :\n${delegates || "aucune"}\nNe relance pas une tâche encore active.\n\nOutils du pont T3 détectés à ce tour :\n${bridgeInventory(pi)}\n\nT3 Code injecte directement ses outils MCP sous les noms mcp__t3-code__*. Vérifie les outils dont tu as besoin au moment de les utiliser ; certains sont différés et nécessitent tool_search. Respecte les instructions T3 injectées dans cette session : utilise les outils natifs de délégation lorsqu’ils sont disponibles et autorisés, consulte orchestrator_capabilities avant le premier delegate_task et suis next. Dans le champ task de chaque delegate_task, commence par [plan-step:N], où N est le numéro de l’étape concernée. Attends le résultat de la délégation et de sa revue avant de terminer l’étape ; ne lance pas ces appels dans le même lot que todo done. Ne sonde pas une tâche en cours ; après notification de fin T3, utilise task_status pour récupérer son résultat. Ne crée pas de thread principal pour une sous-tâche. Délègue une revue indépendante quand un réviseur autorisé est disponible ; sinon vérifie directement et signale l’absence de revue indépendante. Consulte todo. Pour les étapes sans entrée, ajoute uniquement leurs titres todo exacts dans une phase dédiée avec l’opération append ; ne réinitialise jamais la liste ni les tâches préexistantes. À la reprise, conserve les statuts déjà enregistrés. Utilise ensuite start et done après vérification, en respectant les dépendances. En cas de blocage, n’indique pas l’étape comme terminée et rapporte la raison. Quand toutes les étapes sont terminées, utilise plan_finish avec une preuve distincte pour chaque étape.`;
-}
 
 export default function (pi: ExtensionAPI) {
   const updateStatus = (ctx: ExtensionContext, state: PlanState | null) => {
@@ -66,7 +51,7 @@ export default function (pi: ExtensionAPI) {
         const state: PlanState = { version: 1, id: randomUUID(), session: getSession(ctx), cwd: ctx.cwd, phase: "planning", request: input, tasks: [], updatedAt: new Date().toISOString() };
         record(state, "started"); await saveState(agentDir, state); updateStatus(ctx, state);
       });
-      pi.sendUserMessage(`Prépare un plan pour cette demande, sans modifier le projet : ${input}`);
+      pi.sendUserMessage(planStartMessage(input));
     },
   });
 
@@ -106,8 +91,8 @@ export default function (pi: ExtensionAPI) {
     const state = await load(ctx);
     if (!state || state.phase === "completed" || state.phase === "cancelled") return;
     const instruction = state.phase === "planning" || state.phase === "awaiting_approval"
-      ? `MODE PLAN ACTIF. Ne modifie aucun fichier du projet et ne délègue aucune implémentation. Explore avec les outils de lecture directement fournis par le harness T3 et Pi ; vérifie leur disponibilité quand tu en as besoin. Ne lance aucun shell, codemode ni sous-agent pendant le plan. Clarifie uniquement les décisions nécessaires. Prépare un plan concret avec résultat visé, périmètre, contraintes, risques, tâches ordonnées, dépendances, critères vérifiables et vérification finale. Identifie les tâches indépendantes pour le harness T3, sans lancer de sous-agent pendant le plan. Puis appelle plan_submit pour le présenter et demander l'approbation explicite. La confirmation approuve le plan et lance immédiatement l'exécution. Demande d'origine : ${state.request}`
-      : state.phase === "paused" ? "Le plan est en pause. Ne reprends pas son exécution avant /plan resume." : executionPrompt(state, pi);
+      ? planningPrompt(state)
+      : state.phase === "paused" ? pausedPrompt : executionPrompt(state, pi);
     return { systemPrompt: `${event.systemPrompt}\n\n${instruction}` };
   });
 
@@ -165,7 +150,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "plan_submit", label: "Présenter le plan", description: "Présente un plan détaillé à l'utilisateur. Une confirmation explicite approuve le plan et déclenche immédiatement son exécution.",
+    name: "plan_submit", label: "Présenter le plan", description: planToolDescriptions.submit,
     parameters: Type.Object({ title: nonempty, summary: nonempty, constraints: Type.Optional(Type.Array(nonempty, { maxItems: 20 })), risks: Type.Optional(Type.Array(nonempty, { maxItems: 20 })), tasks: Type.Array(taskSchema, { minItems: 1, maxItems: 30 }) }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       signal?.throwIfAborted();
@@ -196,11 +181,11 @@ export default function (pi: ExtensionAPI) {
     },
   });
   pi.registerTool({
-    name: "plan_status", label: "État du plan", description: "Lit le plan et l'état des étapes de la session.", parameters: Type.Object({}),
+    name: "plan_status", label: "État du plan", description: planToolDescriptions.status, parameters: Type.Object({}),
     async execute(_id, _params, _signal, _onUpdate, ctx) { const state = await load(ctx); return result(state ? JSON.stringify(state, null, 2) : "Aucun plan dans cette session.", state ?? {}); },
   });
   pi.registerTool({
-    name: "plan_finish", label: "Terminer le plan", description: "Clôture le plan lorsque toutes ses étapes sont terminées dans todo et accompagnées de preuves.",
+    name: "plan_finish", label: "Terminer le plan", description: planToolDescriptions.finish,
     parameters: Type.Object({ evidence: Type.Array(Type.Object({ task: nonempty, proof: nonempty }), { minItems: 1, maxItems: 30 }) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       return lock(ctx, async () => {

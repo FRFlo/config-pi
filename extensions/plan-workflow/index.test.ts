@@ -52,7 +52,7 @@ describe("plan T3", () => {
     const h = harness("approved", async () => true); await h.commands.get("plan").handler("Construire", h.ctx); await h.invoke("plan_submit", payload);
     expect((await readState(dir, dir, "approved"))?.phase).toBe("executing");
     expect(h.sent.find((x) => x.message)?.options).toEqual({ triggerTurn: true, deliverAs: "followUp" });
-    expect(h.sent.find((x) => x.message)?.message.content).toContain("ne réinitialise jamais");
+    expect(h.sent.find((x) => x.message)?.message.content).toContain("never reinitialize");
     expect(h.sent.find((x) => x.message)?.message.content).toContain("mcp__t3-code__");
     expect(await h.events.get("tool_call")!({ toolName: "write" }, h.ctx)).toBeUndefined();
     await expect(h.invoke("plan_finish", {})).rejects.toThrow();
@@ -82,7 +82,7 @@ describe("plan T3", () => {
       const proof = { evidence: [{ task: "Étape", proof: "OK" }] };
       await expect(h.invoke("plan_finish", proof)).rejects.toThrow("encore actives");
       await h.commands.get("plan").handler("pause", h.ctx); await h.commands.get("plan").handler("resume", h.ctx);
-      expect(h.sent.filter((x) => x.message).at(-1).message.content).toContain("child-task: running, étape 1, implementation");
+      expect(h.sent.filter((x) => x.message).at(-1).message.content).toContain("child-task: running, step 1, implementation");
       await event("task_status", "completed"); await h.invoke("plan_finish", proof);
       expect((await readState(dir, dir, "delegation"))?.phase).toBe("completed");
     } finally { if (previous === undefined) delete process.env.T3_PI_MCP_EXTENSION_PATH; else process.env.T3_PI_MCP_EXTENSION_PATH = previous; }
