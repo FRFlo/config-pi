@@ -20,7 +20,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { isRpcMode } from "../agents-md/shared/rpc-dialogs.ts";
+import { isRpcMode } from "./rpc-dialogs.ts";
 
 interface Snippet {
 	/** Filename, e.g. "concise.md" */

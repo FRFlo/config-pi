@@ -9,7 +9,7 @@ import {
 	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { rpcInput, rpcSelect, isRpcMode, resolveRpcSelection } from "./agents-md/shared/rpc-dialogs";
+import { rpcInput, rpcSelect, isRpcMode, resolveRpcSelection } from "./prompt-snippets/rpc-dialogs";
 
 interface AskOption {
 	label: string;
