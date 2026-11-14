@@ -13,13 +13,13 @@ import {
 	sqliteReadAgentsMemoryPage,
 	sqliteReadProjectMemories,
 	sqliteWriteFile,
-} from "../../observational-memory/src/memory/sqlite.js";
-import { spawnWorker } from "../../observational-memory/src/spawn/launch.js";
+} from "../shared/observational-memory/memory/sqlite.js";
+import { spawnWorker } from "../shared/observational-memory/spawn/launch.js";
 import { registerAgentsMdTool } from "../worker/tool.js";
 import agentsMdExtension from "../index.js";
 
-vi.mock("../../observational-memory/src/spawn/launch.js", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../../observational-memory/src/spawn/launch.js")>()),
+vi.mock("../shared/observational-memory/spawn/launch.js", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../shared/observational-memory/spawn/launch.js")>()),
 	spawnWorker: vi.fn(async () => ({ code: 0, signal: null, stderr: "" })),
 }));
 

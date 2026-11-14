@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "1.4.0",
+  "lastChangelogVersion": "1.5.2",
   "theme": "dark",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-6-luna",
@@ -9,32 +9,21 @@
     "git:github.com/FRFlo/pi-web-search",
     "git:github.com/code-yeongyu/pi-apply-patch",
     "git:github.com/FRFlo/pi-todotools",
-    "git:github.com/FRFlo/pi-quotas",
     "npm:pi-antigravity",
-    "npm:pi-lsp",
-    "npm:@tintinweb/pi-subagents"
+    "npm:pi-lsp"
   ],
   "extensions": [
     "!**/*.test.ts"
   ],
-  "observational-memory": {
-    "backend": "sqlite",
-    "models": {
-      "observer": {
-        "provider": "antigravity",
-        "id": "gemini-3.7-flash"
-      },
-      "consolidator": {
-        "provider": "antigravity",
-        "id": "gemini-3.7-flash"
-      }
-    }
-  },
   "terminal": {
     "notify": "next-turn"
   },
   "hideThinkingBlock": true,
   "defaultTools": [
     "+codemode"
-  ]
+  ],
+  "extensionChangelogVersions": {
+    "{\"source\":\"git:github.com/code-yeongyu/pi-apply-patch\",\"scope\":\"user\"}": "0.1.4",
+    "{\"source\":\"git:github.com/FRFlo/pi-todotools\",\"scope\":\"user\"}": "0.2.1"
+  }
 }

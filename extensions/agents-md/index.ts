@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadConfig } from "../observational-memory/src/config.js";
-import type { ConfiguredModel } from "../observational-memory/src/config.js";
+import { loadConfig } from "./shared/observational-memory/config.js";
+import type { ConfiguredModel } from "./shared/observational-memory/config.js";
 import { registerAgentsMdCommands, updateAgentsMd } from "./src/agents-md.js";
 
 export default function agentsMdExtension(pi: ExtensionAPI): void {

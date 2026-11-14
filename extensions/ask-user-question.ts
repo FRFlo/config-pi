@@ -14,8 +14,8 @@ import {
 	askDiscordQuestion,
 	loadDiscordBridgeConfig,
 	resolveDiscordQuestion,
-} from "./discord-bridge";
-import { hermesInput, hermesSelect, isHermesRpc, resolveRpcSelection } from "./hermes-rpc";
+} from "./agents-md/shared/discord-bridge";
+import { hermesInput, hermesSelect, isHermesRpc, resolveRpcSelection } from "./agents-md/shared/hermes-rpc";
 
 interface AskOption {
 	label: string;

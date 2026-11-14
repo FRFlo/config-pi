@@ -7,7 +7,7 @@ import {
 	sqliteListAgentsMemoryPages,
 	sqliteMarkAgentsMemoryPageProcessed,
 	sqliteReadAgentsMemoryPage,
-} from "../../observational-memory/src/memory/sqlite.js";
+} from "../shared/observational-memory/memory/sqlite.js";
 
 const Schema = Type.Object({
 	path: Type.String(),
