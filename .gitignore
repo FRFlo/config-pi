@@ -43,3 +43,6 @@ bin/
 .profile/
 **/.profile/
 .gitnexus
+
+# T3 plan state (session-specific)
+plan-workflow-state/
