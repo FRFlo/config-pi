@@ -18,9 +18,9 @@ const OPENAI_RESPONSES_APIS: ReadonlySet<Api> = new Set([
 	"openai-codex-responses",
 ]);
 const ENABLE_ENV = "PI_OPENAI_WEB_SEARCH";
-// OpenAI still supports this legacy server-tool name; Codex and xAI use web_search.
+// Use the current Responses API tool type; model compatibility settings may override it.
 // https://developers.openai.com/api/docs/guides/tools-web-search
-const NATIVE_OPENAI_WEB_SEARCH_TYPE = "web_search_preview";
+const NATIVE_OPENAI_WEB_SEARCH_TYPE = "web_search";
 const WEB_SEARCH_SOURCES_INCLUDE = "web_search_call.action.sources";
 const STATUS_KEY = "openai-web-search";
 const WIDGET_KEY = "openai-web-search";
