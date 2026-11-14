@@ -1,8 +1,8 @@
 {
   "lastChangelogVersion": "1.5.2",
   "theme": "dark",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-6-luna",
+  "defaultProvider": "openai",
+  "defaultModel": "gpt-6.1-sol",
   "enableInstallTelemetry": false,
   "enableAnalytics": false,
   "packages": [
@@ -26,6 +26,11 @@
     "+codemode"
   ],
   "extensionChangelogVersions": {
-    "{\"source\":\"git:github.com/code-yeongyu/pi-apply-patch\",\"scope\":\"user\"}": "0.1.4"
-  }
+    "{\"source\":\"git:github.com/code-yeongyu/pi-apply-patch\",\"scope\":\"user\"}": "0.1.4",
+    "{\"source\":\"git:github.com/code-yeongyu/pi-todotools\",\"scope\":\"user\"}": "0.2.1",
+    "{\"source\":\"git:github.com/code-yeongyu/pi-goal\",\"scope\":\"user\"}": "0.3.1",
+    "{\"source\":\"git:github.com/code-yeongyu/pi-nested-agents-md\",\"scope\":\"user\"}": "0.1.1",
+    "{\"source\":\"git:github.com/code-yeongyu/pi-webfetch\",\"scope\":\"user\"}": "0.1.3"
+  },
+  "deviceId": "037eb2f4-94eb-4904-bcfa-861b567f2b68"
 }
