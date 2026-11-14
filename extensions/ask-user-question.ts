@@ -9,13 +9,7 @@ import {
 	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import {
-	type AnswerItem,
-	askDiscordQuestion,
-	loadDiscordBridgeConfig,
-	resolveDiscordQuestion,
-} from "./agents-md/shared/discord-bridge";
-import { hermesInput, hermesSelect, isHermesRpc, resolveRpcSelection } from "./agents-md/shared/hermes-rpc";
+import { rpcInput, rpcSelect, isRpcMode, resolveRpcSelection } from "./agents-md/shared/rpc-dialogs";
 
 interface AskOption {
 	label: string;
@@ -121,45 +115,6 @@ function normalizeOptions(options: Array<{ label: string; value?: string; descri
 			description: option.description?.trim() || undefined,
 		}))
 		.filter((option) => option.label.length > 0);
-}
-
-function extractRecentConversation(sessionManager?: any, maxCount = 6): Array<{ role: string; content: string }> {
-	if (!sessionManager) return [];
-	try {
-		const branch = (typeof sessionManager.getBranch === "function"
-			? sessionManager.getBranch()
-			: typeof sessionManager.getEntries === "function"
-			? sessionManager.getEntries()
-			: []) as Array<any>;
-
-		const messages: Array<{ role: string; content: string }> = [];
-
-		for (let i = branch.length - 1; i >= 0; i--) {
-			const entry = branch[i];
-			if (entry?.type === "message" && entry.message) {
-				const msg = entry.message;
-				if (msg.role === "user" || msg.role === "assistant") {
-					let text = "";
-					if (typeof msg.content === "string") {
-						text = msg.content;
-					} else if (Array.isArray(msg.content)) {
-						text = msg.content
-							.filter((c: any) => c.type === "text" && c.text)
-							.map((c: any) => c.text)
-							.join("\n");
-					}
-					text = text.trim();
-					if (text) {
-						messages.unshift({ role: msg.role, content: text });
-					}
-				}
-			}
-			if (messages.length >= maxCount) break;
-		}
-		return messages;
-	} catch {
-		return [];
-	}
 }
 
 function getOtherLabel(options: AskOption[]): string {
@@ -268,19 +223,19 @@ async function askRpcMode(
 ): Promise<AskAnswer[] | null> {
 	const title = rpcQuestionTitle(question, details, context);
 	if (mode === "text") {
-		const value = await hermesInput(ctx, title, "Enter your answer", signal);
+		const value = await rpcInput(ctx, title, "Enter your answer", signal);
 		const trimmed = value?.trim() || "";
 		return trimmed ? [{ type: "text", label: trimmed, value: trimmed }] : null;
 	}
 
 	if (mode === "single-select") {
 		const otherLabel = getOtherLabel(options);
-		const selected = await hermesSelect(ctx, title, [...options.map(rpcOptionLabel), otherLabel], signal);
+		const selected = await rpcSelect(ctx, title, [...options.map(rpcOptionLabel), otherLabel], signal);
 		const resolved = resolveRpcSelection(selected, options.map(rpcOptionLabel));
 		if (!resolved) return null;
 		const other = selected === otherLabel;
 		if (other) {
-			const value = (await hermesInput(ctx, `${title}\n\nCustom answer`, "Enter your answer", signal))?.trim() || "";
+			const value = (await rpcInput(ctx, `${title}\n\nCustom answer`, "Enter your answer", signal))?.trim() || "";
 			return value ? [{ type: "other", label: value, value }] : null;
 		}
 		if (resolved.kind === "other") {
@@ -296,7 +251,7 @@ async function askRpcMode(
 	const remaining = [...options];
 	const answers: AskAnswer[] = [];
 	while (true) {
-		const selected = await hermesSelect(
+		const selected = await rpcSelect(
 			ctx,
 			`${title}\n\nSelected: ${answers.map((answer) => answer.label).join(", ") || "none"}`,
 			[...remaining.map(rpcOptionLabel), getOtherLabel(remaining), "Submit selection"],
@@ -305,7 +260,7 @@ async function askRpcMode(
 		if (selected === undefined || selected === "Submit selection") break;
 		const otherLabel = getOtherLabel(remaining);
 		if (selected === otherLabel) {
-			const value = (await hermesInput(ctx, `${title}\n\nCustom answer`, "Enter your answer", signal))?.trim() || "";
+			const value = (await rpcInput(ctx, `${title}\n\nCustom answer`, "Enter your answer", signal))?.trim() || "";
 			if (value) answers.push({ type: "other", label: value, value });
 			continue;
 		}
@@ -330,15 +285,15 @@ async function askTextMode(
 	context: string | undefined,
 	initialDraft = "",
 	persist?: (draft: string) => void,
-): Promise<{ answers: AskAnswer[] | null; retry?: boolean }> {
+): Promise<{ answers: AskAnswer[] | null }> {
 	// T3 Code's Pi RPC bridge exposes serializable dialogs, not Pi's custom TUI.
 	// Keep restored/pending text questions answerable there as well.
-	if (isHermesRpc(ctx)) {
+	if (isRpcMode(ctx)) {
 		const title = [
 			rpcQuestionTitle(question, details, context),
 			initialDraft ? `Existing draft:\n${initialDraft}` : undefined,
 		].filter(Boolean).join("\n\n");
-		const value = (await hermesInput(
+		const value = (await rpcInput(
 			ctx,
 			title,
 			initialDraft ? "Continue or replace your answer" : "Enter your answer",
@@ -348,40 +303,17 @@ async function askTextMode(
 		return { answers: [{ type: "text", label: value, value }] };
 	}
 
-	const discordConfig = loadDiscordBridgeConfig();
-
-	return ctx.ui.custom<{ answers: AskAnswer[] | null; retry?: boolean }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null; retry?: boolean }) => void) => {
+	return ctx.ui.custom<{ answers: AskAnswer[] | null }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null }) => void) => {
 		let cachedLines: string[] | undefined;
 		let cachedWidth = -1;
 		let finished = false;
-		let delegationStatus: string | undefined;
-		const questionId = Math.random().toString(36).slice(2, 10);
-		let isDelegating = false;
-		const abortCtrl = new AbortController();
 		const editor = new Editor(tui, createEditorTheme(theme));
 		editor.setText(initialDraft);
 
-		function safeDone(result: { answers: AskAnswer[] | null; retry?: boolean }) {
+		function safeDone(result: { answers: AskAnswer[] | null }) {
 			if (finished) return;
 			finished = true;
 			persist?.(editor.getText());
-			if (isDelegating) {
-				if (result.answers) {
-					const answerText = formatAnswersForContent(result.answers);
-					const msg = `✅ **Répondu depuis le terminal :**\n${answerText}`;
-					resolveDiscordQuestion(questionId, msg, false, discordConfig).finally(() => {
-						abortCtrl.abort();
-					});
-				} else if (!result.retry) {
-					resolveDiscordQuestion(questionId, "❌ Question annulée depuis le terminal", true, discordConfig).finally(() => {
-						abortCtrl.abort();
-					});
-				} else {
-					abortCtrl.abort();
-				}
-			} else {
-				abortCtrl.abort();
-			}
 			done(result);
 		}
 
@@ -397,52 +329,6 @@ async function askTextMode(
 		function refresh() {
 			cachedLines = undefined;
 			tui.requestRender();
-		}
-
-		if (discordConfig.enabled !== false && discordConfig.endpoint) {
-			const startDelegation = () => {
-				if (finished) return;
-				isDelegating = true;
-
-				const recentMessages = extractRecentConversation(ctx.sessionManager, 6);
-				askDiscordQuestion(
-					{
-						id: questionId,
-						question,
-						details,
-						context,
-						recentMessages,
-					},
-					abortCtrl.signal,
-					discordConfig,
-				)
-					.then((res) => {
-						if (abortCtrl.signal.aborted || finished) return;
-						if (res.status === "answered" && res.answers.length > 0) {
-							const mappedAnswers: AskAnswer[] = res.answers.map((a) => ({
-								type: "text",
-								label: a.label,
-								value: a.value,
-							}));
-							safeDone({ answers: mappedAnswers });
-						} else if (res.status === "retry") {
-							safeDone({ answers: null, retry: true });
-						} else if (res.status === "cancelled") {
-							safeDone({ answers: null });
-						} else {
-							delegationStatus = `Erreur Discord: ${res.error || "Pas de réponse"}`;
-							refresh();
-						}
-					})
-					.catch((err) => {
-						if (!abortCtrl.signal.aborted && !finished) {
-							delegationStatus = `Erreur Discord: ${err.message || String(err)}`;
-							refresh();
-						}
-					});
-			};
-
-			startDelegation();
 		}
 
 		function handleInput(data: string) {
@@ -473,11 +359,6 @@ async function askTextMode(
 			}
 			lines.push("");
 
-			if (delegationStatus) {
-				add(theme.fg("warning", ` 🤖 [Discord Relay] ${delegationStatus}`));
-				lines.push("");
-			}
-
 			add(theme.fg("muted", " Saisissez votre réponse :"));
 			for (const line of editor.render(Math.max(1, width - 2))) {
 				add(` ${line}`);
@@ -507,7 +388,7 @@ async function askSingleChoice(
 	details: string | undefined,
 	context: string | undefined,
 	options: AskOption[],
-): Promise<{ answers: AskAnswer[] | null; retry?: boolean }> {
+): Promise<{ answers: AskAnswer[] | null }> {
 	const otherLabel = getOtherLabel(options);
 	const allOptions: DisplayOption[] = [
 		...options.map((option, index) => ({
@@ -518,40 +399,17 @@ async function askSingleChoice(
 		{ id: "other", label: otherLabel, value: "__other__", isOther: true },
 	];
 
-	const discordConfig = loadDiscordBridgeConfig();
-
-	return ctx.ui.custom<{ answers: AskAnswer[] | null; retry?: boolean }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null; retry?: boolean }) => void) => {
+	return ctx.ui.custom<{ answers: AskAnswer[] | null }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null }) => void) => {
 		let optionIndex = 0;
 		let editMode = false;
 		let cachedLines: string[] | undefined;
 		let cachedWidth = -1;
 		let finished = false;
-		let delegationStatus: string | undefined;
-		const questionId = Math.random().toString(36).slice(2, 10);
-		let isDelegating = false;
-		const abortCtrl = new AbortController();
 		const editor = new Editor(tui, createEditorTheme(theme));
 
-		function safeDone(result: { answers: AskAnswer[] | null; retry?: boolean }) {
+		function safeDone(result: { answers: AskAnswer[] | null }) {
 			if (finished) return;
 			finished = true;
-			if (isDelegating) {
-				if (result.answers) {
-					const answerText = formatAnswersForContent(result.answers);
-					const msg = `✅ **Répondu depuis le terminal :**\n${answerText}`;
-					resolveDiscordQuestion(questionId, msg, false, discordConfig).finally(() => {
-						abortCtrl.abort();
-					});
-				} else if (!result.retry) {
-					resolveDiscordQuestion(questionId, "❌ Question annulée depuis le terminal", true, discordConfig).finally(() => {
-						abortCtrl.abort();
-					});
-				} else {
-					abortCtrl.abort();
-				}
-			} else {
-				abortCtrl.abort();
-			}
 			done(result);
 		}
 
@@ -564,72 +422,6 @@ async function askSingleChoice(
 		function refresh() {
 			cachedLines = undefined;
 			tui.requestRender();
-		}
-
-		if (discordConfig.enabled !== false && discordConfig.endpoint) {
-			const startDelegation = () => {
-				if (finished) return;
-				isDelegating = true;
-
-				const recentMessages = extractRecentConversation(ctx.sessionManager, 6);
-				askDiscordQuestion(
-					{
-						id: questionId,
-						question,
-						details,
-						context,
-						recentMessages,
-						options,
-						multiSelect: false,
-					},
-					abortCtrl.signal,
-					discordConfig,
-				)
-					.then((res) => {
-						if (abortCtrl.signal.aborted || finished) return;
-						if (res.status === "answered" && res.answers.length > 0) {
-							const ans = res.answers[0];
-							if (ans.type === "option" && ans.index) {
-								const opt = options[ans.index - 1] || { label: ans.label, value: ans.value };
-								safeDone({
-									answers: [
-										{
-											type: "option",
-											label: opt.label,
-											value: opt.value,
-											index: ans.index,
-										},
-									],
-								});
-							} else {
-								safeDone({
-									answers: [
-										{
-											type: "other",
-											label: ans.label,
-											value: ans.value,
-										},
-									],
-								});
-							}
-						} else if (res.status === "retry") {
-							safeDone({ answers: null, retry: true });
-						} else if (res.status === "cancelled") {
-							safeDone({ answers: null });
-						} else {
-							delegationStatus = `Erreur Discord: ${res.error || "Pas de réponse"}`;
-							refresh();
-						}
-					})
-					.catch((err) => {
-						if (!abortCtrl.signal.aborted && !finished) {
-							delegationStatus = `Erreur Discord: ${err.message || String(err)}`;
-							refresh();
-						}
-					});
-			};
-
-			startDelegation();
 		}
 
 		function handleInput(data: string) {
@@ -698,11 +490,6 @@ async function askSingleChoice(
 			}
 			lines.push("");
 
-			if (delegationStatus) {
-				add(theme.fg("warning", ` 🤖 [Discord Relay] ${delegationStatus}`));
-				lines.push("");
-			}
-
 			for (let i = 0; i < allOptions.length; i++) {
 				const option = allOptions[i];
 				const isFocused = i === optionIndex;
@@ -760,7 +547,7 @@ async function askMultiChoice(
 	details: string | undefined,
 	context: string | undefined,
 	options: AskOption[],
-): Promise<{ answers: AskAnswer[] | null; retry?: boolean }> {
+): Promise<{ answers: AskAnswer[] | null }> {
 	const otherLabel = getOtherLabel(options);
 	const choiceItems: DisplayOption[] = options.map((option, index) => ({
 		...option,
@@ -779,41 +566,18 @@ async function askMultiChoice(
 		submitItem,
 	];
 
-	const discordConfig = loadDiscordBridgeConfig();
-
-	return ctx.ui.custom<{ answers: AskAnswer[] | null; retry?: boolean }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null; retry?: boolean }) => void) => {
+	return ctx.ui.custom<{ answers: AskAnswer[] | null }>((tui: any, theme: any, _kb: any, done: (result: { answers: AskAnswer[] | null }) => void) => {
 		let optionIndex = 0;
 		let editMode = false;
 		let cachedLines: string[] | undefined;
 		let cachedWidth = -1;
 		let finished = false;
-		let delegationStatus: string | undefined;
-		const questionId = Math.random().toString(36).slice(2, 10);
-		let isDelegating = false;
-		const abortCtrl = new AbortController();
 		const selected = new Map<string, AskAnswer>();
 		const editor = new Editor(tui, createEditorTheme(theme));
 
-		function safeDone(result: { answers: AskAnswer[] | null; retry?: boolean }) {
+		function safeDone(result: { answers: AskAnswer[] | null }) {
 			if (finished) return;
 			finished = true;
-			if (isDelegating) {
-				if (result.answers) {
-					const answerText = formatAnswersForContent(result.answers);
-					const msg = `✅ **Répondu depuis le terminal :**\n${answerText}`;
-					resolveDiscordQuestion(questionId, msg, false, discordConfig).finally(() => {
-						abortCtrl.abort();
-					});
-				} else if (!result.retry) {
-					resolveDiscordQuestion(questionId, "❌ Question annulée depuis le terminal", true, discordConfig).finally(() => {
-						abortCtrl.abort();
-					});
-				} else {
-					abortCtrl.abort();
-				}
-			} else {
-				abortCtrl.abort();
-			}
 			done(result);
 		}
 
@@ -828,65 +592,6 @@ async function askMultiChoice(
 		function refresh() {
 			cachedLines = undefined;
 			tui.requestRender();
-		}
-
-		if (discordConfig.enabled !== false && discordConfig.endpoint) {
-			const startDelegation = () => {
-				if (finished) return;
-				isDelegating = true;
-
-				const recentMessages = extractRecentConversation(ctx.sessionManager, 6);
-				askDiscordQuestion(
-					{
-						id: questionId,
-						question,
-						details,
-						context,
-						recentMessages,
-						options,
-						multiSelect: true,
-					},
-					abortCtrl.signal,
-					discordConfig,
-				)
-					.then((res) => {
-						if (abortCtrl.signal.aborted || finished) return;
-						if (res.status === "answered" && res.answers.length > 0) {
-							const mappedAnswers: AskAnswer[] = res.answers.map((ans) => {
-								if (ans.type === "option" && ans.index) {
-									const opt = options[ans.index - 1] || { label: ans.label, value: ans.value };
-									return {
-										type: "option",
-										label: opt.label,
-										value: opt.value,
-										index: ans.index,
-									};
-								}
-								return {
-									type: "other",
-									label: ans.label,
-									value: ans.value,
-								};
-							});
-							safeDone({ answers: sortAnswers(mappedAnswers) });
-						} else if (res.status === "retry") {
-							safeDone({ answers: null, retry: true });
-						} else if (res.status === "cancelled") {
-							safeDone({ answers: null });
-						} else {
-							delegationStatus = `Erreur Discord: ${res.error || "Pas de réponse"}`;
-							refresh();
-						}
-					})
-					.catch((err) => {
-						if (!abortCtrl.signal.aborted && !finished) {
-							delegationStatus = `Erreur Discord: ${err.message || String(err)}`;
-							refresh();
-						}
-					});
-			};
-
-			startDelegation();
 		}
 
 		function toggleOption(item: DisplayOption) {
@@ -984,11 +689,6 @@ async function askMultiChoice(
 				addWrapped(lines, theme.fg("dim", ` Contexte: ${context}`), width);
 			}
 			lines.push("");
-
-			if (delegationStatus) {
-				add(theme.fg("warning", ` 🤖 [Discord Relay] ${delegationStatus}`));
-				lines.push("");
-			}
 
 			for (let i = 0; i < allItems.length; i++) {
 				const item = allItems[i];
@@ -1138,7 +838,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				return unavailableResult(params.question, mode, "ask_user_question requires interactive mode UI", context);
 			}
 
-			if (isHermesRpc(ctx)) {
+			if (isRpcMode(ctx)) {
 				const answers = await askRpcMode(ctx, params.question, details, context, mode, options, signal);
 				return answers ? buildResult(params.question, context, mode, answers) : cancelledResult(params.question, mode, context);
 			}
@@ -1158,9 +858,6 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 						pi.appendEntry(QUESTION_STATE_TYPE, { ...persisted, draft }),
 					);
 					pi.appendEntry(QUESTION_STATE_TYPE, { ...persisted, draft: res.answers?.[0]?.value, status: res.answers ? "answered" : "pending" });
-					if (res.retry) {
-						return cancelledResult(params.question, mode, context, "Action interrompue pour forker / réessayer la session depuis Discord.");
-					}
 					if (!res.answers) {
 						return cancelledResult(params.question, mode, context);
 					}
@@ -1169,9 +866,6 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 
 				if (mode === "single-select") {
 					const res = await askSingleChoice(ctx, params.question, details, context, options);
-					if (res.retry) {
-						return cancelledResult(params.question, mode, context, "Action interrompue pour forker / réessayer la session depuis Discord.");
-					}
 					if (!res.answers) {
 						return cancelledResult(params.question, mode, context);
 					}
@@ -1179,9 +873,6 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				}
 
 				const res = await askMultiChoice(ctx, params.question, details, context, options);
-				if (res.retry) {
-					return cancelledResult(params.question, mode, context, "Action interrompue pour forker / réessayer la session depuis Discord.");
-				}
 				if (!res.answers) {
 					return cancelledResult(params.question, mode, context);
 				}

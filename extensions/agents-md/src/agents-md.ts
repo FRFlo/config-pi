@@ -3,16 +3,16 @@ import { spawnSync } from "node:child_process";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { ConfiguredModel } from "../shared/observational-memory/config.js";
-import { loadConfig } from "../shared/observational-memory/config.js";
+import type { ConfiguredModel } from "../shared/memory-support/config.js";
+import { loadConfig } from "../shared/memory-support/config.js";
 import {
 	sqliteBeginAgentsMemoryRun,
 	sqliteFinishAgentsMemoryRun,
 	sqliteListAgentsMemoryPages,
 	sqliteListFiles,
 	sqliteReadFile,
-} from "../shared/observational-memory/memory/sqlite.js";
-import { buildWorkerArgv, spawnWorker } from "../shared/observational-memory/spawn/launch.js";
+} from "../shared/memory-support/memory/sqlite.js";
+import { buildWorkerArgv, spawnWorker } from "../shared/memory-support/spawn/launch.js";
 
 const WORKER_EXTENSION = join(dirname(fileURLToPath(import.meta.url)), "..", "worker", "index.ts");
 

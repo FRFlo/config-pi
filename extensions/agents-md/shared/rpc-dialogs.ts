@@ -1,5 +1,5 @@
-/** Dependency-free Pi RPC dialogs shared by Hermes and T3 Code's Pi provider. */
-export type HermesDialogContext = {
+/** Dependency-free Pi RPC dialogs for Pi RPC mode. */
+export type RpcDialogContext = {
   mode?: string;
   hasUI?: boolean;
   ui: {
@@ -9,7 +9,7 @@ export type HermesDialogContext = {
   };
 };
 
-export function isHermesRpc(ctx: { mode?: string } | undefined): boolean {
+export function isRpcMode(ctx: { mode?: string } | undefined): boolean {
   return ctx?.mode === "rpc";
 }
 
@@ -22,16 +22,14 @@ export function resolveRpcSelection(
   return index >= 0 ? { kind: "option", index } : { kind: "other", value: selected };
 }
 
-export async function hermesInput(ctx: HermesDialogContext, title: string, placeholder?: string, signal?: AbortSignal) {
+export async function rpcInput(ctx: RpcDialogContext, title: string, placeholder?: string, signal?: AbortSignal) {
   return ctx.ui.input(title, placeholder, { signal });
 }
 
-export async function hermesSelect(ctx: HermesDialogContext, title: string, options: string[], signal?: AbortSignal) {
+export async function rpcSelect(ctx: RpcDialogContext, title: string, options: string[], signal?: AbortSignal) {
   return ctx.ui.select(title, options, { signal });
 }
 
-export async function hermesConfirm(ctx: HermesDialogContext, title: string, message: string, signal?: AbortSignal) {
+export async function rpcConfirm(ctx: RpcDialogContext, title: string, message: string, signal?: AbortSignal) {
   return ctx.ui.confirm(title, message, { signal });
 }
-
-export default function hermesRpcApi(): void {}

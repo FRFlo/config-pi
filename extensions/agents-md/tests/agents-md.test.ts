@@ -13,13 +13,12 @@ import {
 	sqliteReadAgentsMemoryPage,
 	sqliteReadProjectMemories,
 	sqliteWriteFile,
-} from "../shared/observational-memory/memory/sqlite.js";
-import { spawnWorker } from "../shared/observational-memory/spawn/launch.js";
+} from "../shared/memory-support/memory/sqlite.js";
+import { spawnWorker } from "../shared/memory-support/spawn/launch.js";
 import { registerAgentsMdTool } from "../worker/tool.js";
-import agentsMdExtension from "../index.js";
 
-vi.mock("../shared/observational-memory/spawn/launch.js", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../shared/observational-memory/spawn/launch.js")>()),
+vi.mock("../shared/memory-support/spawn/launch.js", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../shared/memory-support/spawn/launch.js")>()),
 	spawnWorker: vi.fn(async () => ({ code: 0, signal: null, stderr: "" })),
 }));
 
@@ -153,7 +152,7 @@ it("rejects AGENTS.md targets whose directory was replaced by a symlink", async 
 	expect(() => readFileSync(join(outside, "AGENTS.md"), "utf8")).toThrow();
 });
 
-it("uses recursive targets for automatic consolidation updates", async () => {
+it("uses recursive targets when updating existing memories", async () => {
 	const project = tempRoot();
 	const memoryRoot = join(project, ".memory", "session-a");
 	mkdirSync(join(project, "src", "app"), { recursive: true });
@@ -161,21 +160,7 @@ it("uses recursive targets for automatic consolidation updates", async () => {
 	sqliteWriteFile(memoryRoot, "auth.md", "auth rules");
 	sqliteWriteFile(join(project, ".memory", "session-b"), "build.md", "build commands");
 
-	let onConsolidated: ((data: unknown) => void) | undefined;
-	agentsMdExtension({
-		registerCommand: () => undefined,
-		events: {
-			on: (_channel: string, handler: (data: unknown) => void) => {
-				onConsolidated = handler;
-				return () => undefined;
-			},
-		},
-	} as any);
-	onConsolidated?.({
-		projectRoot: project,
-		memoryRoot,
-		model: { provider: "test", id: "model" },
-	});
+	await updateAgentsMd({ memoryRoot, model: { provider: "test", id: "model" } }, project, { rebuild: false });
 
 	await vi.waitFor(() => expect(vi.mocked(spawnWorker)).toHaveBeenCalledTimes(2));
 	const prompt = vi.mocked(spawnWorker).mock.calls.at(-1)?.[0].stdin ?? "";

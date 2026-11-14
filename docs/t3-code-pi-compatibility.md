@@ -17,17 +17,9 @@ The bridge does not render custom Pi TUI components, widgets, status/footer
 text, terminal titles, or keyboard shortcuts. Use an extension command as the
 invocation path for functionality that was previously reachable only by a
 shortcut. For example, prompt snippets remain available through `/snippets`;
-their TUI preview/widget is intentionally omitted in T3 Code. Supervisor,
-observational-memory, bash-guard, agents-md, and terminal status decorations
+their TUI preview/widget is intentionally omitted in T3 Code. Agents-md and terminal status decorations
 are likewise not displayed, while their underlying commands and tools remain
 available.
-
-T3 Code currently maps every Pi `notify` event to a warning-style
-`system_notice` and drops its notification level. Observational-memory
-therefore suppresses routine info toasts in RPC mode to avoid false warning
-markers; errors and warnings remain visible, and `/om:status` remains an
-explicit visible report. Pi TUI notifications are unchanged. Preserving
-notification severity correctly requires a change to T3 Code's Pi adapter.
 
 ## RPC dialog compatibility
 
@@ -37,10 +29,9 @@ methods instead. The ask-user-question text prompt now uses `input` when
 restoring a pending question in RPC mode. For choices, T3 Code may return
 free-form text directly from a `select` dialog rather than returning a
 predefined option; ask-user-question treats an unmatched answer as “Other”
-instead of reporting cancellation. Its remaining choice flows and bash-guard /
-prompt-snippets menus use RPC-compatible dialogs.
+instead of reporting cancellation. Its remaining choice flows and prompt-snippets menus use RPC-compatible dialogs.
 
 When adding UI to an extension, check for `ctx.mode === "rpc"` (or the shared
-`isHermesRpc` helper, which detects Pi's RPC mode) and provide a serializable
+`isRpcMode` helper, which detects Pi's RPC mode) and provide a serializable
 dialog fallback. Do not treat an absent widget/status display as a failure of
 the extension's main behavior.

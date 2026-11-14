@@ -20,7 +20,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { isHermesRpc } from "../agents-md/shared/hermes-rpc.ts";
+import { isRpcMode } from "../agents-md/shared/rpc-dialogs.ts";
 
 interface Snippet {
 	/** Filename, e.g. "concise.md" */
@@ -161,7 +161,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	async function openMenu(ctx: ExtensionContext) {
-		if (isHermesRpc(ctx)) {
+		if (isRpcMode(ctx)) {
 			await openRpcMenu(ctx);
 			return;
 		}
