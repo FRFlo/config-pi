@@ -8,9 +8,12 @@
   "packages": [
     "git:github.com/FRFlo/pi-web-search",
     "git:github.com/code-yeongyu/pi-apply-patch",
-    "git:github.com/FRFlo/pi-todotools",
     "npm:pi-antigravity",
-    "npm:pi-lsp"
+    "npm:pi-lsp",
+    "git:github.com/code-yeongyu/pi-todotools",
+    "git:github.com/code-yeongyu/pi-goal",
+    "git:github.com/code-yeongyu/pi-nested-agents-md",
+    "git:github.com/code-yeongyu/pi-webfetch"
   ],
   "extensions": [
     "!**/*.test.ts"
@@ -23,7 +26,6 @@
     "+codemode"
   ],
   "extensionChangelogVersions": {
-    "{\"source\":\"git:github.com/code-yeongyu/pi-apply-patch\",\"scope\":\"user\"}": "0.1.4",
-    "{\"source\":\"git:github.com/FRFlo/pi-todotools\",\"scope\":\"user\"}": "0.2.1"
+    "{\"source\":\"git:github.com/code-yeongyu/pi-apply-patch\",\"scope\":\"user\"}": "0.1.4"
   }
 }
