@@ -12,7 +12,7 @@ export default function (pi: ExtensionAPI) {
     const model = ctx.model?.id?.toLowerCase() ?? "";
     const sections = [
       buildIntentGate({ tools: categorizeTools(names), surface: "app" }),
-      buildWorkingTaskSection(),
+      buildWorkingTaskSection({ toolNames: names }),
       buildVerificationSection({ surface: "app" }),
     ];
     if (/^(gpt-|o[134])/.test(model)) sections.push(buildFileOperationsTuning({ toolNames: names }));
