@@ -8,7 +8,7 @@ const dir = mkdtempSync(join(tmpdir(), "pi-t3-plan-test-"));
 mock.module("@earendil-works/pi-coding-agent", () => ({ getAgentDir: () => dir, withFileMutationQueue: (_path: string, fn: () => unknown) => fn() }));
 mock.module("typebox", () => ({ Type: { String: () => ({}), Object: () => ({}), Array: () => ({}), Integer: () => ({}), Union: () => ({}), Literal: () => ({}), Optional: () => ({}), Boolean: () => ({}) } }));
 const { default: register } = await import("./index");
-const { readState, statePath, todoKey } = await import("./state");
+const { executionWaves, readState, statePath, todoKey } = await import("./state");
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 function harness(session: string, confirm: () => Promise<boolean>, catalog: any[] = []) {
@@ -18,14 +18,57 @@ function harness(session: string, confirm: () => Promise<boolean>, catalog: any[
   const invoke = (name: string, args: any) => tools.get(name).execute("test", args, undefined, undefined, ctx);
   return { events, tools, commands, sent, ctx, invoke };
 }
-const payload = { title: "Titre", summary: "But", tasks: [{ title: "Étape", description: "Travail", verify: "Commande et résultat" }] };
+const final_verification = { creation: 'Change created', review: 'Direct review', correction: 'No actionable findings', checks: 'Tests OK after review', limitations: 'None' };
+const payload = { review: { scope: 'Checked', dependencies: 'Checked', verification: 'Checked', risks: 'Checked' }, title: "Titre", summary: "But", tasks: [{ title: "Étape", description: "Travail", verify: "Commande et résultat" }] };
 
 describe("plan T3", () => {
+  test("exige une revue avant présentation et une vérification finale avant clôture", async () => {
+    const h = harness("review-gates", async () => true);
+    await h.commands.get("plan").handler("Construire", h.ctx);
+    await expect(h.invoke("plan_submit", { ...payload, review: undefined })).rejects.toThrow("revue");
+    await h.invoke("plan_submit", payload);
+    const key = todoKey((await readState(dir, dir, "review-gates"))!, 0);
+    await h.events.get("tool_result")!({ toolName: "todo", isError: false, details: { phases: [{ tasks: [{ content: key, status: "completed" }] }] } }, h.ctx);
+    await expect(h.invoke("plan_finish", { evidence: [{ task: "Étape", proof: "OK" }] })).rejects.toThrow("vérification finale");
+    await expect(h.invoke("plan_finish", { evidence: [{ task: "Étape", proof: "OK" }], final_verification: { ...final_verification, correction: "" } })).rejects.toThrow("correction");
+    await h.invoke("plan_finish", { final_verification, evidence: [{ task: "Étape", proof: "OK" }] });
+    expect((await readState(dir, dir, "review-gates"))?.finalVerification).toEqual(final_verification);
+  });
+  test("calcule les vagues à partir des dépendances", async () => {
+    const h = harness("waves", async () => false); await h.commands.get("plan").handler("Construire", h.ctx);
+    await h.invoke("plan_submit", { ...payload, tasks: [...payload.tasks, { title: "Parallèle", description: "x", verify: "x" }, { title: "Suite", description: "x", verify: "x", depends_on: [1, 2] }] });
+    expect(executionWaves((await readState(dir, dir, "waves"))!)).toEqual([[1, 2], [3]]);
+  });
+  test("transfère explicitement un plan en pause et conserve les étapes terminées", async () => {
+    const source = harness("source", async () => true); await source.commands.get("plan").handler("Construire", source.ctx);
+    await source.invoke("plan_submit", { ...payload, tasks: [...payload.tasks, { title: "Suite", description: "x", verify: "x", depends_on: [1] }] });
+    const initial = (await readState(dir, dir, "source"))!; const first = todoKey(initial, 0), second = todoKey(initial, 1);
+    await source.events.get("tool_result")!({ toolName: "todo", details: { phases: [{ tasks: [{ content: first, status: "completed" }, { content: second, status: "pending" }] }] } }, source.ctx);
+    await source.commands.get("plan").handler("pause", source.ctx);
+    const target = harness("target", async () => true); await target.commands.get("plan").handler(`resume ${initial.id}`, target.ctx);
+    expect((await readState(dir, dir, "source"))?.phase).toBe("cancelled");
+    expect((await readState(dir, dir, "target"))?.tasks.map((task) => task.status)).toEqual(["done", "pending"]);
+    await target.events.get("tool_result")!({ toolName: "todo", details: { phases: [{ tasks: [{ content: first, status: "pending" }, { content: second, status: "pending" }] }] } }, target.ctx);
+    expect((await readState(dir, dir, "target"))?.tasks[0].status).toBe("done");
+  });
+  test("refuse le transfert tant qu'une délégation T3 observée est active", async () => {
+    const previous = process.env.T3_PI_MCP_EXTENSION_PATH; const bridge = join(dir, "transfer-bridge.ts"); process.env.T3_PI_MCP_EXTENSION_PATH = bridge;
+    try {
+      const catalog = [{ name: "mcp__t3-code__delegate_task", sourceInfo: { path: bridge } }];
+      const source = harness("source-active", async () => true, catalog); await source.commands.get("plan").handler("Construire", source.ctx); await source.invoke("plan_submit", payload);
+      await source.events.get("tool_result")!({ toolName: "mcp__t3-code__delegate_task", input: { task: "[plan-step:1] Travail" }, structuredContent: { structuredContent: { taskId: "active-child", status: "running" } } }, source.ctx);
+      const state = (await readState(dir, dir, "source-active"))!; await source.commands.get("plan").handler("pause", source.ctx);
+      const target = harness("target-active", async () => true);
+      await expect(target.commands.get("plan").handler(`resume ${state.id}`, target.ctx)).rejects.toThrow("encore actives");
+      expect((await readState(dir, dir, "source-active"))?.phase).toBe("paused"); expect(await readState(dir, dir, "target-active")).toBeNull();
+    } finally { if (previous === undefined) delete process.env.T3_PI_MCP_EXTENSION_PATH; else process.env.T3_PI_MCP_EXTENSION_PATH = previous; }
+  });
   test("bloque les outils non autorisés pendant le plan et après un refus", async () => {
     const h = harness("denied", async () => false);
     expect([...h.tools.keys()]).toEqual(["plan_submit", "plan_status", "plan_finish"]);
     await h.commands.get("plan").handler("Construire", h.ctx);
     for (const name of ["bash", "codemode", "task", "mcp__t3_code__delegate_task"]) expect((await h.events.get("tool_call")!({ toolName: name }, h.ctx)).block).toBe(true);
+    expect(await h.events.get("tool_call")!({ toolName: "todo", input: { op: "init", list: [{ phase: "Plan", items: ["a"] }] } }, h.ctx)).toBeUndefined();
     expect(await h.events.get("tool_call")!({ toolName: "read" }, h.ctx)).toBeUndefined();
     await h.invoke("plan_submit", payload);
     expect((await readState(dir, dir, "denied"))?.phase).toBe("awaiting_approval");
@@ -39,12 +82,19 @@ describe("plan T3", () => {
         { name: "tool_search", sourceInfo: { path: "builtin:tool-search" } },
         { name: "mcp__t3-code__orchestrator_capabilities", sourceInfo: { path: bridge } },
         { name: "mcp__t3-code__delegate_task", sourceInfo: { path: bridge } },
+        { name: "mcp__t3-code__task_status", sourceInfo: { path: bridge } },
         { name: "mcp__t3-code__t3_project_read", sourceInfo: { path: join(dir, "impostor.ts") } },
       ];
       const h = harness("bridge", async () => false, catalog); await h.commands.get("plan").handler("Étudier", h.ctx);
       expect(await h.events.get("tool_call")!({ toolName: "tool_search" }, h.ctx)).toBeUndefined();
       expect(await h.events.get("tool_call")!({ toolName: "mcp__t3-code__orchestrator_capabilities" }, h.ctx)).toBeUndefined();
-      expect((await h.events.get("tool_call")!({ toolName: "mcp__t3-code__delegate_task" }, h.ctx)).block).toBe(true);
+      expect((await h.events.get("tool_call")!({ toolName: "mcp__t3-code__delegate_task", input: { interactionMode: "default", role: "research" } }, h.ctx)).block).toBe(true);
+      expect((await h.events.get("tool_call")!({ toolName: "mcp__t3-code__delegate_task", input: { interactionMode: "plan", role: "implementation" } }, h.ctx)).block).toBe(true);
+      expect(await h.events.get("tool_call")!({ toolName: "mcp__t3-code__delegate_task", input: { interactionMode: "plan", role: "research" } }, h.ctx)).toBeUndefined();
+      expect(await h.events.get("tool_call")!({ toolName: "mcp__t3-code__delegate_task", input: { interactionMode: "plan", role: "review" } }, h.ctx)).toBeUndefined();
+      await h.events.get("tool_result")!({ toolName: "mcp__t3-code__delegate_task", input: { role: "review" }, structuredContent: { structuredContent: { taskId: "plan-review", status: "running" } } }, h.ctx);
+      await expect(h.invoke("plan_submit", payload)).rejects.toThrow("revues déléguées");
+      await h.events.get("tool_result")!({ toolName: "mcp__t3-code__task_status", structuredContent: { structuredContent: { taskId: "plan-review", status: "completed" } } }, h.ctx);
       expect((await h.events.get("tool_call")!({ toolName: "mcp__t3-code__t3_project_read" }, h.ctx)).block).toBe(true);
     } finally { if (previous === undefined) delete process.env.T3_PI_MCP_EXTENSION_PATH; else process.env.T3_PI_MCP_EXTENSION_PATH = previous; }
   });
@@ -55,11 +105,15 @@ describe("plan T3", () => {
     expect(h.sent.find((x) => x.message)?.message.content).toContain("never reinitialize");
     expect(h.sent.find((x) => x.message)?.message.content).toContain("mcp__t3-code__");
     expect(await h.events.get("tool_call")!({ toolName: "write" }, h.ctx)).toBeUndefined();
+    expect(await h.events.get("tool_call")!({ toolName: "bash" }, h.ctx)).toBeUndefined();
+    expect(await h.events.get("tool_call")!({ toolName: "todo", input: { op: "done", task: "Soumettre le plan détaillé pour approbation explicite" } }, h.ctx)).toBeUndefined();
     await expect(h.invoke("plan_finish", {})).rejects.toThrow();
     const key = todoKey((await readState(dir, dir, "approved"))!, 0);
+    const invalidAppend = await h.events.get("tool_call")!({ toolName: "todo", input: { op: "append", items: ["Étape"] } }, h.ctx);
+    expect(invalidAppend.block).toBe(true); expect(invalidAppend.reason).toContain(key);
     await h.events.get("tool_result")!({ toolName: "todo", isError: false, details: { phases: [{ tasks: [{ content: key, status: "completed" }] }] } }, h.ctx);
-    await expect(h.invoke("plan_finish", { evidence: [] })).rejects.toThrow();
-    await h.invoke("plan_finish", { evidence: [{ task: "Étape", proof: "test : OK" }] }); const completed = (await readState(dir, dir, "approved"))!; expect(completed.phase).toBe("completed");
+    await expect(h.invoke("plan_finish", { final_verification, evidence: [] })).rejects.toThrow();
+    await h.invoke("plan_finish", { final_verification, evidence: [{ task: "Étape", proof: "test : OK" }] }); const completed = (await readState(dir, dir, "approved"))!; expect(completed.phase).toBe("completed");
     expect(completed.history?.map((entry) => entry.event)).toEqual(["started", "submitted", "approved", "step_updated", "completed"]);
   });
   test("observe les tâches du pont T3 et bloque la clôture tant qu’une tâche est active", async () => {
@@ -79,7 +133,7 @@ describe("plan T3", () => {
       expect((await h.events.get("tool_call")!({ toolName: "todo", input: { op: "done", task: stepKey } }, h.ctx)).block).toBe(true);
       const key = todoKey((await readState(dir, dir, "delegation"))!, 0);
       await h.events.get("tool_result")!({ toolName: "todo", isError: false, details: { phases: [{ tasks: [{ content: key, status: "completed" }] }] } }, h.ctx);
-      const proof = { evidence: [{ task: "Étape", proof: "OK" }] };
+      const proof = { final_verification, evidence: [{ task: "Étape", proof: "OK" }] };
       await expect(h.invoke("plan_finish", proof)).rejects.toThrow("encore actives");
       await h.commands.get("plan").handler("pause", h.ctx); await h.commands.get("plan").handler("resume", h.ctx);
       expect(h.sent.filter((x) => x.message).at(-1).message.content).toContain("child-task: running, step 1, implementation");
@@ -87,11 +141,26 @@ describe("plan T3", () => {
       expect((await readState(dir, dir, "delegation"))?.phase).toBe("completed");
     } finally { if (previous === undefined) delete process.env.T3_PI_MCP_EXTENSION_PATH; else process.env.T3_PI_MCP_EXTENSION_PATH = previous; }
   });
-  test("redemande explicitement l’approbation même pour le même plan", async () => {
-    const messages: string[] = []; const h = harness("approval-nonce", async () => false);
-    h.ctx.ui.confirm = async (_title: string, message: string) => { messages.push(message); return false; };
-    await h.commands.get("plan").handler("Construire", h.ctx); await h.invoke("plan_submit", payload); await h.invoke("plan_submit", payload);
-    expect(messages).toHaveLength(2); expect(messages[0]).not.toBe(messages[1]);
+  test("garde un plan refusé modifiable, puis demande à nouveau l’accord après modification", async () => {
+    const messages: string[] = []; let confirmations = 0;
+    const h = harness("approval-revision", async () => ++confirmations === 2);
+    h.ctx.ui.confirm = async (_title: string, message: string) => { messages.push(message); return ++confirmations === 2; };
+    await h.commands.get("plan").handler("Construire", h.ctx);
+    const declined = await h.invoke("plan_submit", payload);
+    const first = (await readState(dir, dir, "approval-revision"))!;
+    expect(first.phase).toBe("awaiting_approval");
+    expect(declined.content[0].text).toContain("reste modifiable");
+    expect(first.history?.map((entry) => entry.event)).toEqual(["started", "submitted", "approval_declined"]);
+    const revised = { ...payload, summary: "But révisé", tasks: [{ ...payload.tasks[0], description: "Travail corrigé", verify: "Vérification corrigée" }] };
+    await h.invoke("plan_submit", revised);
+    const approved = (await readState(dir, dir, "approval-revision"))!;
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).not.toBe(messages[1]);
+    expect(messages[1]).toContain("But révisé");
+    expect(approved.digest).not.toBe(first.digest);
+    expect(approved.phase).toBe("executing");
+    expect(approved.history?.map((entry) => entry.event)).toEqual(["started", "submitted", "approval_declined", "submitted", "approved"]);
+    expect(h.sent.find((x) => x.message)?.message.content).toContain("The user has explicitly approved");
   });
   test("n'approuve pas sans interface de confirmation", async () => {
     const h = harness("headless", async () => true); h.ctx.hasUI = false;
@@ -117,7 +186,7 @@ describe("plan T3", () => {
     await update([{ content: first, status: "completed" }, { content: second, status: "pending" }]);
     expect(await h.events.get("tool_call")!({ toolName: "todo", input: { op: "done", task: second } }, h.ctx)).toBeUndefined();
     await update([{ content: first, status: "completed" }, { content: second, status: "completed" }]);
-    await h.invoke("plan_finish", { evidence: [{ task: "Étape", proof: "OK" }, { task: "Suite", proof: "OK" }] });
+    await h.invoke("plan_finish", { final_verification, evidence: [{ task: "Étape", proof: "OK" }, { task: "Suite", proof: "OK" }] });
   });
   test("refuse la reprise si le plan approuvé a été modifié", async () => {
     const h = harness("changed", async () => true); await h.commands.get("plan").handler("Construire", h.ctx); await h.invoke("plan_submit", payload);

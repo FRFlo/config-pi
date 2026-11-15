@@ -4,7 +4,28 @@ import { dirname, join, resolve } from "node:path";
 
 export type Task = { title: string; description: string; verify: string; status: "pending" | "in_progress" | "done" | "blocked"; dependsOn?: number[]; evidence?: string };
 export type Delegate = { taskId: string; status: "queued" | "running" | "waiting" | "cancel_requested" | "completed" | "failed" | "cancelled" | "interrupted"; step?: number; role?: string };
-export type PlanState = { version: 1; id: string; session: string; cwd: string; phase: "planning" | "awaiting_approval" | "executing" | "paused" | "completed" | "cancelled"; request: string; title?: string; summary?: string; constraints?: string[]; risks?: string[]; tasks: Task[]; delegates?: Delegate[]; history?: { at: string; event: string; step?: number; status?: string; detail?: string }[]; planPath?: string; digest?: string; updatedAt: string };
+export type PlanState = { version: 1; id: string; session: string; cwd: string; phase: "planning" | "awaiting_approval" | "executing" | "paused" | "completed" | "cancelled"; request: string; title?: string; summary?: string; constraints?: string[]; risks?: string[]; review?: { scope: string; dependencies: string; verification: string; risks: string }; finalVerification?: { creation: string; review: string; correction: string; checks: string; limitations: string }; todoRestorePending?: boolean; tasks: Task[]; delegates?: Delegate[]; history?: { at: string; event: string; step?: number; status?: string; detail?: string }[]; planPath?: string; digest?: string; updatedAt: string };
+export function executionWaves(state: PlanState): number[][] {
+  const levels: number[] = [];
+  for (const task of state.tasks) levels.push(Math.max(0, ...(task.dependsOn ?? []).map((n) => levels[n - 1] + 1)));
+  const waves: number[][] = [];
+  levels.forEach((level, index) => (waves[level] ??= []).push(index + 1));
+  return waves;
+}
+export async function listStates(agentDir: string, cwd: string): Promise<PlanState[]> {
+  const directory = join(agentDir, "plan-workflow-state");
+  let files: string[];
+  try { files = await fs.readdir(directory); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+  const states: PlanState[] = [];
+  for (const file of files.filter((name) => /^[a-f0-9]{64}\.json$/.test(name))) {
+    try {
+      const value = JSON.parse(await fs.readFile(join(directory, file), "utf8"));
+      if (typeof value.session !== "string" || typeof value.cwd !== "string" || resolve(value.cwd) !== resolve(cwd) || statePath(agentDir, cwd, value.session) !== join(directory, file)) continue;
+      const state = await readState(agentDir, cwd, value.session); if (state) states.push(state);
+    } catch { /* An unrelated corrupt state must not prevent listing valid plans. */ }
+  }
+  return states.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
 export function record(state: PlanState, event: string, extra: { step?: number; status?: string; detail?: string } = {}): void {
   (state.history ??= []).push({ at: new Date().toISOString(), event, ...extra });
 }
@@ -36,7 +57,7 @@ export function todoKey(state: PlanState, index: number): string {
   return `[plan-${state.id.slice(0, 8)}] ${index + 1}. ${state.tasks[index].title}`;
 }
 export function renderPlan(state: PlanState): string {
-  return [`# ${state.title}`, "", "## Objectif", state.summary, "", "## Demande", state.request, "", "## Contraintes", ...(state.constraints?.length ? state.constraints.map((v) => `- ${v}`) : ["- Aucune contrainte supplémentaire précisée."]), "", "## Risques et limites", ...(state.risks?.length ? state.risks.map((v) => `- ${v}`) : ["- Aucun risque supplémentaire précisé."]), "", "## Étapes", ...state.tasks.flatMap((t, i) => [`- [ ] ${i + 1}. ${t.title}`, `  - Travail : ${t.description}`, `  - Vérification : ${t.verify}`, ...(t.dependsOn?.length ? [`  - Dépend de : ${t.dependsOn.join(", ")}`] : [])]), ""].join("\n");
+  return [`# ${state.title}`, "", "## Objectif", state.summary, "", "## Demande", state.request, "", "## Contraintes", ...(state.constraints?.length ? state.constraints.map((v) => `- ${v}`) : ["- Aucune contrainte supplémentaire précisée."]), "", "## Risques et limites", ...(state.risks?.length ? state.risks.map((v) => `- ${v}`) : ["- Aucun risque supplémentaire précisé."]), "", "## Revue du plan", ...(state.review ? [`- Périmètre : ${state.review.scope}`, `- Dépendances : ${state.review.dependencies}`, `- Vérifications : ${state.review.verification}`, `- Risques : ${state.review.risks}`] : ["- Non renseignée (plan antérieur)."]), "", "## Vagues de dépendances", ...executionWaves(state).map((wave, i) => `- Vague ${i + 1} : ${wave.join(", ")}`), "", "## Étapes", ...state.tasks.flatMap((t, i) => [`- [ ] ${i + 1}. ${t.title}`, `  - Travail : ${t.description}`, `  - Vérification : ${t.verify}`, ...(t.dependsOn?.length ? [`  - Dépend de : ${t.dependsOn.join(", ")}`] : [])]), ""].join("\n");
 }
 export async function savePlan(agentDir: string, state: PlanState, text: string): Promise<string> {
   const dir = join(agentDir, "plan-workflow-state", "plans");
